@@ -1,0 +1,14 @@
+# Build output
+/build/
+/build-*/
+/dist/
+/package/
+/packages/
+*.o
+*.a
+*.pdb
+*.log
+
+# Local toolchain, scratch files and notes
+/.tools/
+__pycache__/
