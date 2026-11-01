@@ -94,6 +94,7 @@ private:
     ImGuiContext* imgui_ = nullptr;
 
     bool ready_ = false;
+    bool overlay_visible_ = true;
     bool menu_visible_ = true;
     bool platform_ready_ = false;
     bool renderer_ready_ = false;

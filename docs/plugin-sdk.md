@@ -74,6 +74,7 @@ ARK_EXPORT bool ark_plugin_shutdown() {
 ## 绘制与游戏线程
 
 - `on_frame` / `on_draw` 回调在渲染线程执行，通过 `ArkFrameV1.imgui_context` 使用共享 ImGui。插件使用 ImGui 逻辑坐标与 `ImGui::GetIO().DisplaySize`；核心通过 `DisplayFramebufferScale` 统一缩放整个界面，插件不要自行乘以缩放比例。
+- `Insert` 控制整个浮层的显隐：`on_frame` 始终执行，用于后台更新；`on_draw` 仅在浮层可见时执行，用于绘制界面。隐藏不卸载插件，也不重置插件自身的页面状态；隐藏期间核心不捕获新的鼠标或键盘输入，已归属界面的按键释放仍由输入适配器排空。
 - 游戏主线程 API 不得在渲染回调中直接调用，应使用 `queue_game_task` 排队。核心只持有队列，由插件的原生线程适配器在正确的线程调用 `pump_game_tasks`。
 
 ## 输入适配

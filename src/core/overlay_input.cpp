@@ -11,7 +11,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM,
 namespace ark::core {
 namespace {
 
-constexpr WPARAM kMenuToggleKey = VK_INSERT;
+constexpr WPARAM kOverlayToggleKey = VK_INSERT;
 
 bool is_mouse_message(UINT message) {
     return message >= WM_MOUSEFIRST && message <= WM_MOUSELAST;
@@ -51,13 +51,21 @@ LRESULT Overlay::handle_window_message(HWND window, UINT message, WPARAM wparam,
         return forward_message(previous, window, message, wparam, lparam);
     }
 
-    const bool toggle = message == WM_KEYUP && wparam == kMenuToggleKey;
+    const bool toggle = message == WM_KEYUP && wparam == kOverlayToggleKey;
     if (toggle) {
-        menu_visible_ = !menu_visible_;
+        overlay_visible_ = !overlay_visible_;
+        if (overlay_visible_) {
+            menu_visible_ = true;
+        }
     }
 
     if (window == window_ && ready_ && !stopping_) {
         ImGui::SetCurrentContext(imgui_);
+        if (toggle && !overlay_visible_) {
+            // A hidden widget must not retain keyboard focus or an active drag.
+            ImGui::ClearActiveID();
+            ImGui::SetWindowFocus(nullptr);
+        }
         ImGui_ImplWin32_WndProcHandler(window, message, wparam, lparam);
 
         bool mouse_capture = false;
@@ -82,7 +90,7 @@ LRESULT Overlay::handle_window_message(HWND window, UINT message, WPARAM wparam,
                 return 1;
             }
         }
-        if (is_keyboard_message(message) && ImGui::GetIO().WantCaptureKeyboard) {
+        if (is_keyboard_message(message) && overlay_visible_ && ImGui::GetIO().WantCaptureKeyboard) {
             if (!routed || !is_key_release(message)) {
                 return 1;
             }
@@ -96,7 +104,8 @@ LRESULT Overlay::handle_window_message(HWND window, UINT message, WPARAM wparam,
 }
 
 bool Overlay::publish_input_capture(UINT message, LPARAM lparam) {
-    const bool active = ready_ && !stopping_ && GetForegroundWindow() == window_;
+    const bool active =
+        overlay_visible_ && ready_ && !stopping_ && GetForegroundWindow() == window_;
     ImGuiIO& io = ImGui::GetIO();
     bool mouse = io.WantCaptureMouse;
 

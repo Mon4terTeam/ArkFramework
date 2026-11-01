@@ -55,7 +55,7 @@ bool serve_next_game(const std::filesystem::path& root) {
                      utf8_to_wide(report.stage).c_str(), report.error);
         return true;
     }
-    print_status(L"加载完成。游戏内按 Insert 显示或隐藏插件管理器；关闭本窗口不会影响游戏。");
+    print_status(L"加载完成。游戏内按 Insert 显示或隐藏全部插件界面；关闭本窗口不会影响游戏。");
     while (process.valid() &&
            WaitForSingleObject(process.get(), kLogPumpIntervalMs) == WAIT_TIMEOUT) {
         log.pump();

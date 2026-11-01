@@ -195,17 +195,21 @@ void Overlay::draw_frame(IDXGISwapChain* chain) {
     // frame has been rendered.
     std::vector<std::unique_ptr<Invocation>> frame_leases;
     plugins_.dispatch(CallbackKind::Frame, frame, &frame_leases);
-    draw_manager();
-    plugins_.dispatch(CallbackKind::Draw, frame, &frame_leases);
-    if (!plugins_.test_host() && !plugins_.input_protected()) {
-        draw_input_warning();
+    if (overlay_visible_) {
+        draw_manager();
+        plugins_.dispatch(CallbackKind::Draw, frame, &frame_leases);
+        if (!plugins_.test_host() && !plugins_.input_protected()) {
+            draw_input_warning();
+        }
     }
 
     ImGuiIO& io = ImGui::GetIO();
-    io.MouseDrawCursor = menu_visible_ || io.WantCaptureMouse;
+    io.MouseDrawCursor = overlay_visible_ && (menu_visible_ || io.WantCaptureMouse);
     ImGui::Render();
     publish_input_capture();
-    render_draw_data();
+    if (overlay_visible_) {
+        render_draw_data();
+    }
     rendered_ = true;
 }
 
