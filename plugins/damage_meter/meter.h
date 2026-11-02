@@ -120,7 +120,7 @@ private:
     bool export_csv();
     const char* stage_display_name() const;
     void draw_status(Backend* backend);
-    void draw_table(double actual_total, double calculated_total);
+    void draw_table(double actual_total);
     void draw_footer();
 
     void log(std::uint32_t level, const std::string& message) const;
@@ -130,8 +130,7 @@ private:
     std::unique_ptr<GameNameResolver> resolver_;
     Session session_;
     // UI preferences survive session resets.
-    bool sort_by_actual_ = true;
-    bool show_ids_ = false;
+    bool show_dps_ = true;
 };
 
 } // namespace ark::damage_meter

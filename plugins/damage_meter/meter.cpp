@@ -176,7 +176,7 @@ void Meter::export_finished_battle() {
 
 const std::vector<const ActorRow*>& Meter::sorted_rows() {
     if (session_.order_dirty) {
-        session_.stats.sort_rows(session_.sorted_rows, sort_by_actual_);
+        session_.stats.sort_rows(session_.sorted_rows, true);
         session_.order_dirty = false;
     }
     return session_.sorted_rows;

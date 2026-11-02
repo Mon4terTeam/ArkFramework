@@ -19,7 +19,7 @@ constexpr float kFooterHeight = 62;
 constexpr ImVec4 kWarningColor{1.f, .7f, .2f, 1.f};
 constexpr ImVec4 kTestHostColor{1.f, .72f, .25f, 1.f};
 
-constexpr int kColumnCount = 5;
+constexpr int kColumnCount = 6;
 
 bool has_typed_damage(const ActorRow& row) {
     return std::any_of(row.types.begin(), row.types.end(), [](const DamageTotals& totals) {
@@ -27,14 +27,17 @@ bool has_typed_damage(const ActorRow& row) {
     });
 }
 
-// Fills the actual, calculated and share columns of the current table row.
-void draw_amount_columns(double actual, double calculated, double total, bool by_actual) {
+// Fills actual/calculated damage, optional actual DPS and actual share for the current row.
+void draw_amount_columns(double actual, double calculated, double total, double inverse_duration) {
     ImGui::TableNextColumn();
     ImGui::Text("%.2f", actual);
     ImGui::TableNextColumn();
     ImGui::Text("%.2f", calculated);
+    if (ImGui::TableNextColumn()) {
+        ImGui::Text("%.2f", actual * inverse_duration);
+    }
     ImGui::TableNextColumn();
-    ImGui::Text("%.1f%%", total ? (by_actual ? actual : calculated) / total * 100 : 0);
+    ImGui::Text("%.1f%%", total ? actual / total * 100 : 0);
 }
 
 } // namespace
@@ -53,16 +56,12 @@ void Meter::draw(const ArkFrameV1& frame, Backend* backend) {
         return;
     }
     draw_status(backend);
-    if (ImGui::Checkbox("按实际扣血排序 / 计算占比", &sort_by_actual_)) {
-        session_.order_dirty = true;
-    }
-    ImGui::SameLine();
-    ImGui::Checkbox("显示干员 ID", &show_ids_);
+    ImGui::Checkbox("显示 DPS", &show_dps_);
     const double actual_total = session_.stats.total(true);
     const double calculated_total = session_.stats.total(false);
     ImGui::Text("实际扣血：%.2f    计算伤害：%.2f", actual_total, calculated_total);
     ImGui::Separator();
-    draw_table(actual_total, calculated_total);
+    draw_table(actual_total);
     draw_footer();
     ImGui::End();
 }
@@ -106,17 +105,21 @@ void Meter::draw_status(Backend* backend) {
     }
 }
 
-void Meter::draw_table(double actual_total, double calculated_total) {
+void Meter::draw_table(double actual_total) {
     constexpr ImGuiTableFlags kTableFlags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
                                             ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY;
     if (!ImGui::BeginTable("damage", kColumnCount, kTableFlags, {0, -kFooterHeight})) {
         return;
     }
-    for (const char* title : {"干员", "伤害类型", "实际扣血", "计算伤害", "占比"}) {
+    for (const char* title : {"干员", "伤害类型", "实际扣血", "计算伤害"}) {
         ImGui::TableSetupColumn(title);
     }
+    ImGui::TableSetupColumn("DPS", show_dps_ ? ImGuiTableColumnFlags_None
+                                           : ImGuiTableColumnFlags_Disabled);
+    ImGui::TableSetupColumn("占比");
     ImGui::TableHeadersRow();
-    const double total = sort_by_actual_ ? actual_total : calculated_total;
+    const double duration = show_dps_ ? session_.stats.duration() : 0;
+    const double inverse_duration = duration > 0 ? 1.0 / duration : 0;
 
     for (const ActorRow* row : sorted_rows()) {
         const bool has_types = has_typed_damage(*row);
@@ -127,12 +130,11 @@ void Meter::draw_table(double actual_total, double calculated_total) {
         }
         ImGui::TableNextRow();
         ImGui::TableNextColumn();
-        const char* label =
-            show_ids_ ? row->id.c_str() : display_name(session_.actor_names, row->id);
+        const char* label = display_name(session_.actor_names, row->id);
         const bool expanded = ImGui::TreeNodeEx(row->id.c_str(), flags, "%s", label);
         ImGui::TableNextColumn();
         ImGui::TextUnformatted("合计");
-        draw_amount_columns(row->actual, row->calculated, total, sort_by_actual_);
+        draw_amount_columns(row->actual, row->calculated, actual_total, inverse_duration);
         if (!expanded || !has_types) {
             continue;
         }
@@ -146,7 +148,7 @@ void Meter::draw_table(double actual_total, double calculated_total) {
             ImGui::TextDisabled("  -");
             ImGui::TableNextColumn();
             ImGui::TextUnformatted(kDamageTypeNames[type]);
-            draw_amount_columns(amount.actual, amount.calculated, total, sort_by_actual_);
+            draw_amount_columns(amount.actual, amount.calculated, actual_total, inverse_duration);
         }
         ImGui::TreePop();
     }
