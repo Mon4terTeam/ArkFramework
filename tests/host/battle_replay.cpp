@@ -14,6 +14,8 @@ constexpr double kEventInterval = .15;
 constexpr double kDamageScale = 10;
 constexpr double kActualRatio = .8;
 constexpr double kTolerance = .000001;
+constexpr unsigned kBattleFrameCount =
+    static_cast<unsigned>(kBattleDuration * 30.0);
 
 // Captured OF-1 calculated damage per operator. Actual damage is a synthetic
 // fraction of it, used only to exercise the UI.
@@ -35,10 +37,12 @@ bool is_magical_actor(unsigned index) {
     return index == 2 || index == 4;
 }
 
-ArkEventV1 make_damage_event(unsigned sequence) {
+ArkEventV2 make_damage_event(unsigned sequence) {
     const unsigned index = sequence % kActorCount;
-    ArkEventV1 event;
+    ArkEventV2 event;
     event.kind = ARK_DAMAGE;
+    event.frame =
+        (sequence + 1) * kBattleFrameCount / kReplayEventCount;
     event.game_time = (sequence + 1) * kBattleDuration / kReplayEventCount;
     snprintf(event.actor_id, sizeof(event.actor_id), "%s", kActorIds[index]);
     event.calculated_damage = kCalculatedDamage[index] / kDamageScale;
@@ -51,15 +55,17 @@ ArkEventV1 make_damage_event(unsigned sequence) {
 
 void publish_replay(const void* table, void* user) {
     // Neither the table nor its function pointers escape this service lease.
-    const auto* service = static_cast<const ArkBattleTestApiV1*>(table);
-    if (service->size < sizeof(*service) || service->abi_version != ARK_BATTLE_ABI_VERSION) {
+    const auto* service = static_cast<const ArkBattleTestApiV2*>(table);
+    if (service->size < sizeof(*service) ||
+        service->abi_version != ARK_BATTLE_ABI_VERSION_V2) {
         return;
     }
     auto& replay = *static_cast<ReplayState*>(user);
 
     if (!replay.seeded) {
-        ArkEventV1 start;
+        ArkEventV2 start;
         start.kind = ARK_BATTLE_START;
+        start.frame = 0;
         snprintf(start.stage_id, sizeof(start.stage_id), "%s", kStageId);
         if (!service->publish(&start)) {
             replay.failed = true;
@@ -72,7 +78,7 @@ void publish_replay(const void* table, void* user) {
     if (replay.count >= kReplayEventCount || replay.elapsed <= replay.count * kEventInterval) {
         return;
     }
-    const ArkEventV1 damage = make_damage_event(replay.count);
+    const ArkEventV2 damage = make_damage_event(replay.count);
     if (!service->publish(&damage)) {
         replay.failed = true;
         return;
@@ -80,8 +86,9 @@ void publish_replay(const void* table, void* user) {
     ++replay.count;
 
     if (replay.count == kReplayEventCount) {
-        ArkEventV1 end;
+        ArkEventV2 end;
         end.kind = ARK_BATTLE_END;
+        end.frame = kBattleFrameCount;
         end.game_time = kBattleDuration;
         if (!service->publish(&end)) {
             replay.failed = true;
@@ -91,13 +98,32 @@ void publish_replay(const void* table, void* user) {
 
 void inspect_history(const void* table, void* user) {
     constexpr size_t kCapacity = 64;
-    const auto* service = static_cast<const ArkBattleEventsApiV1*>(table);
+    const auto* service = static_cast<const ArkBattleEventsApiV2*>(table);
+    if (service->size < sizeof(*service) ||
+        service->abi_version != ARK_BATTLE_ABI_VERSION_V2) {
+        return;
+    }
     auto& history = *static_cast<HistorySnapshot*>(user);
 
-    ArkEventV1 events[kCapacity];
+    ArkEventV2 events[kCapacity];
     const size_t count = service->read(0, events, kCapacity, &history.status);
+    unsigned previous_frame = 0;
+    bool previous_frame_valid = false;
+    unsigned previous_frame_event_index = 0;
     for (size_t i = 0; i < count; ++i) {
-        const ArkEventV1& event = events[i];
+        const ArkEventV2& event = events[i];
+        if (!previous_frame_valid || event.frame != previous_frame) {
+            history.frame_valid = history.frame_valid && event.frame_event_index == 0;
+            previous_frame = event.frame;
+            previous_frame_event_index = 0;
+            previous_frame_valid = true;
+        } else {
+            history.frame_valid =
+                history.frame_valid &&
+                event.frame_event_index == previous_frame_event_index + 1;
+        }
+        previous_frame_event_index = event.frame_event_index;
+        history.last_frame_event_index = event.frame_event_index;
         switch (event.kind) {
         case ARK_BATTLE_START:
             ++history.starts;
@@ -110,7 +136,8 @@ void inspect_history(const void* table, void* user) {
             break;
         case ARK_BATTLE_END:
             ++history.ends;
-            history.valid = history.valid && event.game_time == kBattleDuration;
+            history.valid = history.valid && event.frame == kBattleFrameCount &&
+                            event.game_time == kBattleDuration;
             break;
         default:
             history.valid = false;
@@ -123,7 +150,8 @@ bool replay_complete(const HistorySnapshot& history) {
     // Each actor appears kReplayEventCount / kActorCount times at 1/kDamageScale.
     constexpr double kExpected = total_calculated_damage();
     const ArkReadStatusV1& status = history.status;
-    return history.valid && !status.partial && !status.overrun && status.ended &&
+    return history.valid && history.frame_valid && !status.partial && !status.overrun &&
+           status.ended &&
            history.starts == 1 && history.damage == kReplayEventCount && history.ends == 1 &&
            std::abs(history.calculated - kExpected) < kTolerance &&
            std::abs(history.actual - kExpected * kActualRatio) < kTolerance;

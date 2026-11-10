@@ -22,8 +22,18 @@ Meter meter;
 
 // --- Battle services -------------------------------------------------------------------------
 
-std::size_t read_events(std::uint64_t after, ArkEventV1* out, std::size_t capacity,
-                        ArkReadStatusV1* status) {
+std::size_t read_events_v1(std::uint64_t after, ArkEventV1* out, std::size_t capacity,
+                           ArkReadStatusV1* status) {
+    Backend* backend = active_backend.load();
+    if (!backend || backend->stopping || !out || !capacity || capacity > kMaxReadCapacity ||
+        (status && status->size < sizeof(*status))) {
+        return 0;
+    }
+    return backend->history.read_v1(after, out, capacity, status);
+}
+
+std::size_t read_events_v2(std::uint64_t after, ArkEventV2* out, std::size_t capacity,
+                           ArkReadStatusV1* status) {
     Backend* backend = active_backend.load();
     if (!backend || backend->stopping || !out || !capacity || capacity > kMaxReadCapacity ||
         (status && status->size < sizeof(*status))) {
@@ -37,7 +47,7 @@ bool read_frame(ArkBattleFrameV1* out) {
     return backend && out && out->size >= sizeof(*out) && backend->current_frame(*out);
 }
 
-bool publish_test_event(const ArkEventV1* event) {
+bool publish_test_event_v1(const ArkEventV1* event) {
     Backend* backend = active_backend.load();
     if (!backend || !backend->host.test_host || backend->stopping || !event ||
         event->size < sizeof(*event)) {
@@ -47,10 +57,24 @@ bool publish_test_event(const ArkEventV1* event) {
     return true;
 }
 
-const ArkBattleEventsApiV1 kEventsApi{sizeof(ArkBattleEventsApiV1), ARK_BATTLE_ABI_VERSION,
-                                      read_events, read_frame};
-const ArkBattleTestApiV1 kTestApi{sizeof(ArkBattleTestApiV1), ARK_BATTLE_ABI_VERSION,
-                                  publish_test_event};
+bool publish_test_event_v2(const ArkEventV2* event) {
+    Backend* backend = active_backend.load();
+    if (!backend || !backend->host.test_host || backend->stopping || !event ||
+        event->size < sizeof(*event)) {
+        return false;
+    }
+    backend->history.publish(*event);
+    return true;
+}
+
+const ArkBattleEventsApiV1 kEventsApiV1{
+    sizeof(ArkBattleEventsApiV1), ARK_BATTLE_ABI_VERSION, read_events_v1, read_frame};
+const ArkBattleEventsApiV2 kEventsApiV2{
+    sizeof(ArkBattleEventsApiV2), ARK_BATTLE_ABI_VERSION_V2, read_events_v2, read_frame};
+const ArkBattleTestApiV1 kTestApiV1{
+    sizeof(ArkBattleTestApiV1), ARK_BATTLE_ABI_VERSION, publish_test_event_v1};
+const ArkBattleTestApiV2 kTestApiV2{
+    sizeof(ArkBattleTestApiV2), ARK_BATTLE_ABI_VERSION_V2, publish_test_event_v2};
 
 // --- Input adapter ---------------------------------------------------------------------------
 
@@ -101,13 +125,23 @@ void register_with_host(const ArkPluginApiV1& host, Backend& backend) {
         }
     }
     if (!host.provide_service(host.owner, ARK_BATTLE_SERVICE_NAME, ARK_BATTLE_ABI_VERSION,
-                              &kEventsApi, sizeof(kEventsApi))) {
-        throw std::runtime_error("Could not provide battle event service");
+                              &kEventsApiV1, sizeof(kEventsApiV1))) {
+        throw std::runtime_error("Could not provide legacy battle event service");
+    }
+    if (!host.provide_service(host.owner, ARK_BATTLE_SERVICE_NAME_V2, ARK_BATTLE_ABI_VERSION_V2,
+                              &kEventsApiV2, sizeof(kEventsApiV2))) {
+        throw std::runtime_error("Could not provide battle event service v2");
     }
     if (host.test_host &&
         !host.provide_service(host.owner, ARK_BATTLE_TEST_SERVICE_NAME, ARK_BATTLE_ABI_VERSION,
-                              &kTestApi, sizeof(kTestApi))) {
-        throw std::runtime_error("Could not provide battle test service");
+                              &kTestApiV1, sizeof(kTestApiV1))) {
+        throw std::runtime_error("Could not provide legacy battle test service");
+    }
+    if (host.test_host &&
+        !host.provide_service(host.owner, ARK_BATTLE_TEST_SERVICE_NAME_V2,
+                              ARK_BATTLE_ABI_VERSION_V2, &kTestApiV2,
+                              sizeof(kTestApiV2))) {
+        throw std::runtime_error("Could not provide battle test service v2");
     }
     if (!host.on_frame(host.owner, on_frame, &backend) ||
         !host.on_draw(host.owner, on_draw, nullptr)) {

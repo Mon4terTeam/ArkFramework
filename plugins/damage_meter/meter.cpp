@@ -98,7 +98,7 @@ void Meter::connect_capture(Backend& backend) {
 
 void Meter::consume_events(Backend& backend) {
     BattleStats& stats = session_.stats;
-    ArkEventV1 events[kReadBatchSize];
+    ArkEventV2 events[kReadBatchSize];
     ArkReadStatusV1 status;
     for (unsigned batch = 0; batch < kReadBatches; ++batch) {
         const std::size_t count =
@@ -107,7 +107,7 @@ void Meter::consume_events(Backend& backend) {
             stats.partial = true;
         }
         for (std::size_t i = 0; i < count; ++i) {
-            const ArkEventV1& event = events[i];
+            const ArkEventV2& event = events[i];
             const std::size_t rows_before = stats.rows.size();
             stats.consume(event);
             if (affects_order(event.kind)) {

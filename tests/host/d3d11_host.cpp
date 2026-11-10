@@ -258,8 +258,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR command_line, int) {
 
         if (exports.with_service && exports.running()) {
             if (!self_test || ark::test_host::publishes_replay(self_test_state)) {
-                if (!exports.with_service(ARK_BATTLE_TEST_SERVICE_NAME, ARK_BATTLE_ABI_VERSION,
-                                          sizeof(ArkBattleTestApiV1),
+                if (!exports.with_service(ARK_BATTLE_TEST_SERVICE_NAME_V2,
+                                          ARK_BATTLE_ABI_VERSION_V2,
+                                          sizeof(ArkBattleTestApiV2),
                                           ark::test_host::publish_replay, &replay)) {
                     replay = {};
                 }

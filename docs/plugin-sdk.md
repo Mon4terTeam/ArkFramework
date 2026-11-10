@@ -96,17 +96,24 @@ ARK_EXPORT bool ark_plugin_shutdown() {
 
 ## 战斗事件服务
 
-`include/ark/battle.h` 定义由 `damage_meter.dll` 提供的 `ark.battle.events` 服务。消费者声明对 `damage_meter.dll` 的依赖后获取 `ArkBattleEventsApiV1`。
+`include/ark/battle.h` 定义由 `damage_meter.dll` 提供的两套战斗事件服务。消费者声明对 `damage_meter.dll` 的依赖后，按需要选择服务名：
 
-- `read(after, buffer, capacity, status)` 返回序号大于 `after` 的事件，单次最多 4096 条。消费者从序号 0 开始重放当前历史，并保存最后序号以免重复累计。
+- `ark.battle.events`，ABI 1：`ArkBattleEventsApiV1` / `ArkEventV1`，与 1.0.0 完全兼容，字段和布局不变。
+- `ark.battle.events.v2`，ABI 2：`ArkBattleEventsApiV2` / `ArkEventV2`，增加逻辑帧、帧内序号、目标、原始来源和召唤物宿主。
+
+`damage_meter.dll` 同时注册两套服务。旧消费者继续请求 ABI 1 即可，不需要改代码；新消费者显式请求 V2 服务名。不要用 ABI 2 的表去填 ABI 1 的缓冲区，两者的事件布局不同。
+
+- `read(after, buffer, capacity, status)` 返回序号大于 `after` 的事件，单次最多 4096 条。消费者从序号 0 开始重放当前历史，并保存最后序号以免重复累计。ABI 1 的 `read` 写入 `ArkEventV1`，ABI 2 的 `read` 写入 `ArkEventV2`。
 - 事件种类：`BattleStart`、`Damage`、`Elemental`、`BattleEnd`、`Clock`。`status.partial` 表示中途接入或历史被截断，`status.overrun` 表示读取落后于有界历史（65,536 条）。
 - `frame(out)` 返回当前战斗的原生逻辑帧（`BattleController.fixedFrameCnt`）及其所属 `battle`，可在渲染线程调用。调用者应核对 `battle` 与正在展示的数据一致；尚未采集时返回 `false`，不能当作帧号 0。结算后保留最终帧，下一次 `BattleStart` 作废旧值。
+- `frame` 是 `ArkEventV2` 的第一时间戳；逻辑帧固定为 30/s。`frame_event_index` 是该事件在所属帧内的发布顺序。`sequence` 是跨帧的全局历史游标，只用于读取和去重。
 - `ArkDamageType` 沿用原生编号：物理 1、法术 2、真实 3、治疗 4、元素 5。`ARK_DAMAGE` 且类型为 5 是元素 HP 伤害；`ARK_ELEMENTAL` 是元素损伤累积，不计入 HP 伤害。治疗、无类型与未知类型不计入四类伤害。
-- `game_time` 是原生战斗时间（`BattleController.fixedPlayTime`），中途接入也不会从零计时。
+- `game_time` 保留原生战斗时间（`BattleController.fixedPlayTime`），只作为辅助显示值；统计和排序以 `frame` 为准。
+- `actor_id` 是伤害来源角色；来源为召唤物/token 且能解析出宿主时，`owner_id` 为宿主干员 ID。`target_id` 是本次 Modifier 的目标实体，`original_source_id` 是原始来源实体。按干员汇总时使用 `owner_id`，逐实体和逐目标分析时使用 `actor_id`/`target_id`。
 
 采集器、事件历史与统计界面都属于 `damage_meter.dll`：关闭统计窗口仍继续采集；卸载或重载会停止采集并销毁历史，不补造缺失数据。
 
-`ark.battle.test` 发布接口仅在 `ArkFrameworkHost.exe` 测试宿主中注册，游戏中不可用。
+`ark.battle.test`（ABI 1）和 `ark.battle.test.v2`（ABI 2）发布接口仅在 `ArkFrameworkHost.exe` 测试宿主中注册，游戏中不可用。旧测试宿主使用前者，新测试宿主使用后者。
 
 ## 共用辅助代码
 

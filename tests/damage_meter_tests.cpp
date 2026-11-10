@@ -25,8 +25,8 @@ void check(bool condition, const char* expression, int line) {
 
 #define ARK_CHECK(condition) check((condition), #condition, __LINE__)
 
-ArkEventV1 make_event(std::uint32_t kind) {
-    ArkEventV1 event;
+ArkEventV2 make_event(std::uint32_t kind) {
+    ArkEventV2 event;
     event.kind = kind;
     return event;
 }
@@ -35,7 +35,7 @@ void set_id(char (&target)[ARK_MAX_ID], const char* value) {
     std::snprintf(target, sizeof(target), "%s", value);
 }
 
-void consume_all(BattleStats& stats, const ArkEventV1* events, std::size_t count) {
+void consume_all(BattleStats& stats, const ArkEventV2* events, std::size_t count) {
     for (std::size_t i = 0; i < count; ++i) {
         stats.consume(events[i]);
     }
@@ -44,23 +44,29 @@ void consume_all(BattleStats& stats, const ArkEventV1* events, std::size_t count
 // Covers replay, duplicate suppression, buildup isolation, bounded history and battle reset.
 void test_history_replay_and_bounds() {
     EventHistory history(4);
-    ArkEventV1 event = make_event(ARK_BATTLE_START);
+    ArkEventV2 event = make_event(ARK_BATTLE_START);
     history.publish(event);
     event.kind = ARK_DAMAGE;
     event.damage_type = ARK_DAMAGE_PHYSICAL;
     event.calculated_damage = 300;
     event.actual_damage = 100;
+    event.frame = 60;
     event.game_time = 2;
     set_id(event.actor_id, "A");
+    set_id(event.owner_id, "host_A");
     history.publish(event);
     event.kind = ARK_CLOCK;
+    event.frame = 120;
     event.game_time = 4;
     history.publish(event);
 
-    ArkEventV1 out[8];
+    ArkEventV2 out[8];
     ArkReadStatusV1 status;
     std::size_t count = history.read(0, out, 8, &status);
     ARK_CHECK(count == 3 && !status.partial);
+    ARK_CHECK(out[0].frame_event_index == 0 && out[1].frame_event_index == 0 &&
+              out[2].frame_event_index == 0);
+    ARK_CHECK(std::string_view(out[1].owner_id) == "host_A");
 
     BattleStats model;
     consume_all(model, out, count);
@@ -100,14 +106,15 @@ void test_history_replay_and_bounds() {
 
 void test_damage_types() {
     EventHistory history(64);
-    const ArkEventV1 start = make_event(ARK_BATTLE_START);
+    const ArkEventV2 start = make_event(ARK_BATTLE_START);
     history.publish(start);
     const auto emit = [&](const char* actor, std::int32_t type, double calculated, double actual,
                           std::uint32_t kind = ARK_DAMAGE) {
-        ArkEventV1 event = make_event(kind);
+        ArkEventV2 event = make_event(kind);
         event.damage_type = type;
         event.calculated_damage = calculated;
         event.actual_damage = actual;
+        event.frame = 30;
         event.game_time = 2;
         set_id(event.actor_id, actor);
         history.publish(event);
@@ -124,7 +131,7 @@ void test_damage_types() {
     emit("A", ARK_DAMAGE_NONE, 1000, 1000);
     emit("A", 99, 1000, 1000);
 
-    ArkEventV1 events[64];
+    ArkEventV2 events[64];
     ArkReadStatusV1 status;
     std::size_t count = history.read(0, events, 64, &status);
     BattleStats model;
@@ -177,7 +184,7 @@ void test_battle_frame_snapshot() {
     history.set_frame(7);
     ARK_CHECK(!history.frame(frame));
 
-    ArkEventV1 event = make_event(ARK_BATTLE_START);
+    ArkEventV2 event = make_event(ARK_BATTLE_START);
     history.publish(event);
     history.set_frame(0);
     ARK_CHECK(history.frame(frame) && frame.frame == 0 && frame.battle == 1);
@@ -185,6 +192,7 @@ void test_battle_frame_snapshot() {
     // The snapshot survives history eviction.
     history.set_frame(90);
     event.kind = ARK_CLOCK;
+    event.frame = 90;
     for (int i = 0; i < 3; ++i) {
         history.publish(event);
     }
@@ -201,6 +209,85 @@ void test_battle_frame_snapshot() {
     ARK_CHECK(!history.frame(frame));
     history.set_frame(0);
     ARK_CHECK(history.frame(frame) && frame.frame == 0 && frame.battle == 2);
+}
+
+void test_event_v2_frame_contract() {
+    EventHistory history(8);
+    ArkEventV2 start = make_event(ARK_BATTLE_START);
+    start.frame = 120;
+    history.publish(start);
+
+    ArkEventV2 damage = make_event(ARK_DAMAGE);
+    damage.frame = 150;
+    damage.damage_type = ARK_DAMAGE_PHYSICAL;
+    damage.calculated_damage = 10;
+    damage.actual_damage = 8;
+    set_id(damage.actor_id, "char_actor");
+    set_id(damage.target_id, "enemy_target");
+    set_id(damage.original_source_id, "char_original");
+    history.publish(damage);
+    history.publish(damage);
+
+    ArkEventV2 out[8];
+    ArkReadStatusV1 status;
+    const std::size_t count = history.read(0, out, 8, &status);
+    ARK_CHECK(count == 3 && !status.partial);
+    ARK_CHECK(out[0].frame == 120 && out[0].frame_event_index == 0);
+    ARK_CHECK(out[1].frame == 150 && out[1].frame_event_index == 0);
+    ARK_CHECK(out[2].frame == 150 && out[2].frame_event_index == 1);
+    ARK_CHECK(std::string_view(out[1].target_id) == "enemy_target");
+    ARK_CHECK(std::string_view(out[1].original_source_id) == "char_original");
+    ARK_CHECK(out[0].sequence + 1 == out[1].sequence &&
+              out[1].sequence + 1 == out[2].sequence);
+
+    start.frame = 0;
+    history.publish(start);
+    ARK_CHECK(history.read(0, out, 8, &status) == 1);
+    ARK_CHECK(out[0].frame == 0 && out[0].frame_event_index == 0);
+}
+
+void test_event_v1_compatibility() {
+    EventHistory history(8);
+    ArkEventV2 start = make_event(ARK_BATTLE_START);
+    start.frame = 30;
+    history.publish(start);
+
+    ArkEventV2 damage = make_event(ARK_DAMAGE);
+    damage.frame = 45;
+    damage.damage_type = ARK_DAMAGE_MAGICAL;
+    damage.calculated_damage = 12.5;
+    damage.actual_damage = 10.0;
+    set_id(damage.actor_id, "char_actor");
+    set_id(damage.owner_id, "char_owner");
+    set_id(damage.target_id, "enemy_target");
+    set_id(damage.original_source_id, "char_original");
+    set_id(damage.stage_id, "stage_v1");
+    history.publish(damage);
+
+    ArkEventV1 legacy[4];
+    ArkReadStatusV1 status;
+    const std::size_t count = history.read_v1(0, legacy, 4, &status);
+    ARK_CHECK(count == 2 && !status.partial && status.newest_sequence == 2);
+    ARK_CHECK(legacy[0].size == sizeof(ArkEventV1) && legacy[0].kind == ARK_BATTLE_START);
+    ARK_CHECK(legacy[1].kind == ARK_DAMAGE &&
+              legacy[1].damage_type == ARK_DAMAGE_MAGICAL);
+    ARK_CHECK(legacy[1].calculated_damage == 12.5 && legacy[1].actual_damage == 10.0);
+    ARK_CHECK(std::string_view(legacy[1].actor_id) == "char_actor");
+    ARK_CHECK(std::string_view(legacy[1].stage_id) == "stage_v1");
+
+    ArkEventV2 full[4];
+    ARK_CHECK(history.read(0, full, 4, &status) == 2);
+    ARK_CHECK(full[1].frame == 45 && std::string_view(full[1].owner_id) == "char_owner");
+
+    // A legacy publisher has no frame; its event is projected at frame 0.
+    ArkEventV1 published;
+    published.kind = ARK_CLOCK;
+    published.game_time = 2.5;
+    history.publish(published);
+    ARK_CHECK(history.read_v1(2, legacy, 4, &status) == 1);
+    ARK_CHECK(legacy[0].kind == ARK_CLOCK && legacy[0].game_time == 2.5);
+    ARK_CHECK(history.read(2, full, 4, &status) == 1);
+    ARK_CHECK(full[0].frame == 0 && full[0].game_time == 2.5);
 }
 
 void test_stage_names() {
@@ -243,7 +330,7 @@ void test_stage_names() {
 
     // The panel shows the resolved label, falling back to the raw stage ID.
     BattleStats model;
-    ArkEventV1 start = make_event(ARK_BATTLE_START);
+    ArkEventV2 start = make_event(ARK_BATTLE_START);
     for (const char* stage :
          {"level_a001_03", "ro3_n_01", "Unrecognized/level_unknown.json", "a001_03"}) {
         set_id(start.stage_id, stage);
@@ -334,6 +421,8 @@ constexpr TestCase kTests[] = {
     {"history replay and bounds", test_history_replay_and_bounds},
     {"damage types", test_damage_types},
     {"battle frame snapshot", test_battle_frame_snapshot},
+    {"event v2 frame contract", test_event_v2_frame_contract},
+    {"event v1 compatibility", test_event_v1_compatibility},
     {"stage names", test_stage_names},
     {"ambiguous basenames", test_ambiguous_basenames},
     {"duplicate labels stay unambiguous", test_duplicate_labels_stay_unambiguous},

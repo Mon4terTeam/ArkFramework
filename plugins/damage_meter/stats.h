@@ -51,11 +51,15 @@ class BattleStats {
 public:
     // Applies one event. Events at or below the last consumed sequence are ignored, so
     // replaying the same history is idempotent.
-    void consume(const ArkEventV1& event) {
+    void consume(const ArkEventV2& event) {
         if (event.sequence && event.sequence <= sequence) {
             return;
         }
         sequence = event.sequence;
+        if (!frame_valid || event.frame > frame) {
+            frame = event.frame;
+            frame_valid = true;
+        }
         if (event.kind == ARK_BATTLE_START) {
             start_battle(event);
             return;
@@ -70,7 +74,12 @@ public:
         }
     }
 
-    double duration() const { return std::max(0.0, game_time - start_time); }
+    double duration() const {
+        if (frame_valid && frame >= start_frame) {
+            return static_cast<double>(frame - start_frame) / 30.0;
+        }
+        return std::max(0.0, game_time - start_time);
+    }
 
     double total(bool actual) const {
         double sum = 0;
@@ -98,6 +107,9 @@ public:
     std::string stage;
     std::uint64_t sequence = 0;
     std::uint64_t battle = 0;
+    std::uint32_t frame = 0;
+    std::uint32_t start_frame = 0;
+    bool frame_valid = false;
     double game_time = 0;
     // Partial battles (joined mid-way) measure duration from the first observed event.
     double start_time = 0;
@@ -105,17 +117,20 @@ public:
     bool ended = false;
 
 private:
-    void start_battle(const ArkEventV1& event) {
+    void start_battle(const ArkEventV2& event) {
         rows.clear();
         stage = event.stage_id;
         battle = event.battle;
         partial = event.partial != 0;
         start_time = partial ? event.game_time : 0;
+        start_frame = partial ? event.frame : 0;
+        frame = event.frame;
+        frame_valid = true;
         game_time = event.game_time;
         ended = false;
     }
 
-    void add_damage(const ArkEventV1& event) {
+    void add_damage(const ArkEventV2& event) {
         if (!event.actor_id[0] || !std::isfinite(event.calculated_damage) ||
             !std::isfinite(event.actual_damage)) {
             return;

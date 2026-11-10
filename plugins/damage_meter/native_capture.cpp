@@ -98,10 +98,16 @@ struct NativeCapture::Bindings {
     using FrameGetter = std::uint32_t (*)(void*);
 
     ReferenceGetter source = nullptr;
+    ReferenceGetter target = nullptr;
+    ReferenceGetter original_source = nullptr;
     ReferenceGetter character_id = nullptr;
+    ReferenceGetter entity_id = nullptr;
+    ReferenceGetter fetch_host = nullptr;
     ReferenceGetter level_id = nullptr;
     IntGetter damage_type = nullptr;
+    BoolGetter is_token = nullptr;
     BoolGetter is_damage = nullptr;
+    BoolGetter is_heal = nullptr;
     BoolGetter is_cancelled = nullptr;
     BoolGetter is_element_damage = nullptr;
     FixedPointGetter final_delta = nullptr;
@@ -109,10 +115,16 @@ struct NativeCapture::Bindings {
     FrameGetter fixed_frame_count = nullptr;
 
     void* source_info = nullptr;
+    void* target_info = nullptr;
+    void* original_source_info = nullptr;
     void* character_id_info = nullptr;
+    void* entity_id_info = nullptr;
+    void* fetch_host_info = nullptr;
     void* level_id_info = nullptr;
     void* damage_type_info = nullptr;
+    void* is_token_info = nullptr;
     void* is_damage_info = nullptr;
+    void* is_heal_info = nullptr;
     void* is_cancelled_info = nullptr;
     void* is_element_damage_info = nullptr;
     void* final_delta_info = nullptr;
@@ -294,6 +306,7 @@ bool NativeCapture::initialize() {
         }
 
         character_class_ = il2cpp.find_class(game_image, "Torappu.Battle", "Character");
+        void* entity_class = il2cpp.find_class(game_image, "Torappu.Battle", "Entity");
         battle_controller_class_ =
             il2cpp.find_class(game_image, "Torappu.Battle", "BattleController");
         void* logger_class = il2cpp.find_class(game_image, "Torappu.Battle", "BattleLogger");
@@ -333,9 +346,19 @@ bool NativeCapture::initialize() {
         real_delta_offset_ = static_cast<std::size_t>(real_delta_offset);
 
         il2cpp.bind_getter(il2cpp.source, il2cpp.source_info, modifier_class, "get_source");
+        il2cpp.bind_getter(il2cpp.target, il2cpp.target_info, modifier_class, "get_target");
+        il2cpp.bind_getter(il2cpp.original_source, il2cpp.original_source_info,
+                           modifier_class, "get_originalSource");
         il2cpp.bind_getter(il2cpp.final_delta, il2cpp.final_delta_info, modifier_class,
                            "get_finalDelta");
         il2cpp.bind_getter(il2cpp.is_damage, il2cpp.is_damage_info, modifier_class, "get_isDamage");
+        try {
+            il2cpp.bind_getter(il2cpp.is_heal, il2cpp.is_heal_info, modifier_class,
+                               "get_isHeal");
+        } catch (...) {
+            il2cpp.is_heal = nullptr;
+            il2cpp.is_heal_info = nullptr;
+        }
         il2cpp.bind_getter(il2cpp.is_cancelled, il2cpp.is_cancelled_info, modifier_class,
                            "get_isCancelled");
         il2cpp.bind_getter(il2cpp.is_element_damage, il2cpp.is_element_damage_info, modifier_class,
@@ -344,6 +367,18 @@ bool NativeCapture::initialize() {
                            "get_damageType");
         il2cpp.bind_getter(il2cpp.character_id, il2cpp.character_id_info, character_class_,
                            "get_characterId");
+        il2cpp.bind_getter(il2cpp.entity_id, il2cpp.entity_id_info, entity_class, "get_id");
+        try {
+            il2cpp.bind_getter(il2cpp.fetch_host, il2cpp.fetch_host_info, character_class_,
+                               "FetchHost");
+            il2cpp.bind_getter(il2cpp.is_token, il2cpp.is_token_info, character_class_,
+                               "get_isToken");
+        } catch (...) {
+            il2cpp.fetch_host = nullptr;
+            il2cpp.fetch_host_info = nullptr;
+            il2cpp.is_token = nullptr;
+            il2cpp.is_token_info = nullptr;
+        }
         il2cpp.bind_getter(il2cpp.level_id, il2cpp.level_id_info, battle_controller_class_,
                            "get_levelId");
         il2cpp.bind_getter(il2cpp.fixed_play_time, il2cpp.fixed_play_time_info,
@@ -458,8 +493,12 @@ double NativeCapture::game_clock() {
     return from_fixed_point(bindings_->fixed_play_time(bindings_->fixed_play_time_info));
 }
 
+std::uint32_t NativeCapture::current_frame() {
+    return bindings_->fixed_frame_count(bindings_->fixed_frame_count_info);
+}
+
 void NativeCapture::publish_frame() {
-    history_.set_frame(bindings_->fixed_frame_count(bindings_->fixed_frame_count_info));
+    history_.set_frame(current_frame());
 }
 
 void NativeCapture::begin_battle(void* controller, bool partial) {
@@ -468,9 +507,10 @@ void NativeCapture::begin_battle(void* controller, bool partial) {
     battle_ended_ = false;
     last_clock_ = -1;
 
-    ArkEventV1 event;
+    ArkEventV2 event;
     event.kind = ARK_BATTLE_START;
     event.partial = partial;
+    event.frame = current_frame();
     event.game_time = game_clock();
     const Bindings& il2cpp = *bindings_;
     copy_id(event.stage_id, sizeof(event.stage_id),
@@ -485,8 +525,9 @@ void NativeCapture::end_battle() {
         return;
     }
     publish_frame();
-    ArkEventV1 event;
+    ArkEventV2 event;
     event.kind = ARK_BATTLE_END;
+    event.frame = current_frame();
     event.game_time = game_clock();
     history_.publish(event);
     battle_ended_ = true;
@@ -513,8 +554,9 @@ void NativeCapture::update_battle(void* controller) {
         return;
     }
     last_clock_ = now;
-    ArkEventV1 event;
+    ArkEventV2 event;
     event.kind = ARK_CLOCK;
+    event.frame = current_frame();
     event.game_time = now;
     history_.publish(event);
 }
@@ -526,15 +568,27 @@ void NativeCapture::record_damage(void* logger, void* modifier, bool elemental) 
     }
     // Both logger entry points receive modifiers they may ignore internally. Classify the
     // modifier itself; reaching LogEpModifier does not imply elemental damage.
-    const bool counted = elemental
-                             ? il2cpp.is_element_damage(modifier, il2cpp.is_element_damage_info)
-                             : il2cpp.is_damage(modifier, il2cpp.is_damage_info);
+    const bool healing =
+        il2cpp.is_heal &&
+        il2cpp.is_heal(modifier, il2cpp.is_heal_info);
+    const bool counted =
+        elemental
+            ? il2cpp.is_element_damage(modifier, il2cpp.is_element_damage_info)
+            : (il2cpp.is_damage(modifier, il2cpp.is_damage_info) || healing);
     if (!counted) {
         return;
     }
     void* source = il2cpp.source(modifier, il2cpp.source_info);
+    void* original_source =
+        il2cpp.original_source(modifier, il2cpp.original_source_info);
     if (!source || !il2cpp.assignable(character_class_, il2cpp.object_class(source))) {
-        return;
+        if (original_source &&
+            il2cpp.assignable(character_class_,
+                              il2cpp.object_class(original_source))) {
+            source = original_source;
+        } else {
+            source = nullptr;
+        }
     }
     void* controller = nullptr;
     il2cpp.field_value(logger, il2cpp.logger_controller_field, &controller);
@@ -548,18 +602,57 @@ void NativeCapture::record_damage(void* logger, void* modifier, bool elemental) 
         begin_battle(controller, true);
     }
 
-    ArkEventV1 event;
-    event.kind = elemental ? ARK_ELEMENTAL : ARK_DAMAGE;
+    ArkEventV2 event;
+    event.kind = elemental && !healing ? ARK_ELEMENTAL : ARK_DAMAGE;
+    event.frame = current_frame();
     event.game_time = game_clock();
     event.calculated_damage =
         std::abs(from_fixed_point(il2cpp.final_delta(modifier, il2cpp.final_delta_info)));
     std::int64_t real_delta = 0;
     std::memcpy(&real_delta, static_cast<char*>(modifier) + real_delta_offset_, sizeof(real_delta));
     event.actual_damage = std::abs(from_fixed_point(real_delta));
-    event.damage_type = il2cpp.damage_type(modifier, il2cpp.damage_type_info);
-    copy_id(event.actor_id, sizeof(event.actor_id),
-            il2cpp.string(il2cpp.character_id(source, il2cpp.character_id_info)));
-    if (event.actor_id[0] && std::isfinite(event.calculated_damage) &&
+    event.damage_type = healing
+                            ? ARK_DAMAGE_HEAL
+                            : il2cpp.damage_type(modifier, il2cpp.damage_type_info);
+    if (source) {
+        copy_id(event.actor_id, sizeof(event.actor_id),
+                il2cpp.string(il2cpp.character_id(source, il2cpp.character_id_info)));
+    }
+    void* target = il2cpp.target(modifier, il2cpp.target_info);
+    if (target) {
+        copy_id(event.target_id, sizeof(event.target_id),
+                il2cpp.string(il2cpp.entity_id(target, il2cpp.entity_id_info)));
+    }
+    if (original_source) {
+        copy_id(event.original_source_id, sizeof(event.original_source_id),
+                il2cpp.string(il2cpp.entity_id(original_source, il2cpp.entity_id_info)));
+    }
+    if (event.actor_id[0] && il2cpp.is_token && il2cpp.is_token_info &&
+        il2cpp.fetch_host && il2cpp.fetch_host_info &&
+        il2cpp.is_token(source, il2cpp.is_token_info)) {
+        try {
+            void* host = source;
+            for (int depth = 0; depth < 4; ++depth) {
+                void* next = il2cpp.fetch_host(host, il2cpp.fetch_host_info);
+                if (!next || next == host) {
+                    break;
+                }
+                host = next;
+            }
+            if (host && host != source &&
+                il2cpp.assignable(character_class_, il2cpp.object_class(host))) {
+                const std::string owner_id =
+                    il2cpp.string(il2cpp.character_id(host, il2cpp.character_id_info));
+                if (!owner_id.empty() && owner_id != event.actor_id) {
+                    copy_id(event.owner_id, sizeof(event.owner_id), owner_id);
+                }
+            }
+        } catch (...) {
+        }
+    }
+    if ((event.actor_id[0] || event.original_source_id[0] ||
+         event.target_id[0]) &&
+        std::isfinite(event.calculated_damage) &&
         std::isfinite(event.actual_damage)) {
         history_.publish(event);
     }

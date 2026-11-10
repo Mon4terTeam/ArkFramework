@@ -14,8 +14,8 @@ bool publishes_replay(SelfTestState state) {
 void advance_self_test(SelfTestState& state, FrameworkControl control,
                        ArkFrameworkWithService with_service, ReplayState& replay) {
     HistorySnapshot history;
-    const bool present = with_service(ARK_BATTLE_SERVICE_NAME, ARK_BATTLE_ABI_VERSION,
-                                      sizeof(ArkBattleEventsApiV1), inspect_history, &history);
+    const bool present = with_service(ARK_BATTLE_SERVICE_NAME_V2, ARK_BATTLE_ABI_VERSION_V2,
+                                      sizeof(ArkBattleEventsApiV2), inspect_history, &history);
 
     switch (state) {
     case SelfTestState::Initial:

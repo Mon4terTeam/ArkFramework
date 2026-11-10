@@ -42,6 +42,7 @@ private:
     void update_battle(void* controller);
     void record_damage(void* logger, void* modifier, bool elemental);
     double game_clock();
+    std::uint32_t current_frame();
     void publish_frame();
 
     static void on_log_modifier(void* self, void* modifier, void* method);
