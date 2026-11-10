@@ -51,6 +51,8 @@ void Runtime::initialize() {
     ARK_BIND_EXPORT(domain_assemblies, "domain_get_assemblies");
     ARK_BIND_EXPORT(assembly_image, "assembly_get_image");
     ARK_BIND_EXPORT(image_name, "image_get_name");
+    ARK_BIND_EXPORT(image_class_count, "image_get_class_count");
+    ARK_BIND_EXPORT(image_class, "image_get_class");
     ARK_BIND_EXPORT(class_from_name, "class_from_name");
     ARK_BIND_EXPORT(class_parent, "class_get_parent");
     ARK_BIND_EXPORT(class_name, "class_get_name");
@@ -68,10 +70,13 @@ void Runtime::initialize() {
     ARK_BIND_EXPORT(class_nested, "class_get_nested_types");
     ARK_BIND_EXPORT(array_length, "array_length");
     ARK_BIND_EXPORT(field_static_get, "field_static_get_value");
+    ARK_BIND_EXPORT(field_static_set, "field_static_set_value");
     ARK_BIND_EXPORT(array_new, "array_new");
     ARK_BIND_EXPORT(class_fields, "class_get_fields");
+    ARK_BIND_EXPORT(field_flags, "field_get_flags");
     ARK_BIND_EXPORT(field_type, "field_get_type");
     ARK_BIND_EXPORT(field_name, "field_get_name");
+    ARK_BIND_EXPORT(field_offset, "field_get_offset");
     ARK_BIND_EXPORT(field_get, "field_get_value");
     ARK_BIND_EXPORT(field_get_object, "field_get_value_object");
     ARK_BIND_EXPORT(field_set, "field_set_value");
@@ -80,6 +85,7 @@ void Runtime::initialize() {
     ARK_BIND_EXPORT(method_name, "method_get_name");
     ARK_BIND_EXPORT(method_count, "method_get_param_count");
     ARK_BIND_EXPORT(method_param, "method_get_param");
+    ARK_BIND_EXPORT(method_param_name, "method_get_param_name");
     ARK_BIND_EXPORT(method_class, "method_get_class");
     ARK_BIND_EXPORT(method_return, "method_get_return_type");
     ARK_BIND_EXPORT(method_flags, "method_get_flags");
@@ -98,6 +104,8 @@ void Runtime::initialize() {
     ARK_BIND_EXPORT(gc_new, "gchandle_new");
     ARK_BIND_EXPORT(gc_free, "gchandle_free");
     ARK_BIND_EXPORT(gc_target, "gchandle_get_target");
+    ARK_BIND_EXPORT(gchandle_foreach_target, "gchandle_foreach_get_target");
+    ARK_BIND_EXPORT(gc_foreach_heap, "gc_foreach_heap");
 #undef ARK_BIND_EXPORT
 
     size_t registered = 0;

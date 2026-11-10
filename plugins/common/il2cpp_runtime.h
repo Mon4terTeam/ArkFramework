@@ -32,6 +32,8 @@ public:
     void** (*domain_assemblies)(void*, size_t*) = nullptr;
     void* (*assembly_image)(void*) = nullptr;
     const char* (*image_name)(void*) = nullptr;
+    size_t (*image_class_count)(void*) = nullptr;
+    void* (*image_class)(void*, size_t) = nullptr;
 
     // Classes.
     void* (*class_from_name)(void*, const char*, const char*) = nullptr;
@@ -56,11 +58,14 @@ public:
     // Fields.
     void* (*class_field)(void*, const char*) = nullptr;
     void* (*class_fields)(void*, void**) = nullptr;
+    uint32_t (*field_flags)(void*) = nullptr;
     void* (*field_type)(void*) = nullptr;
     const char* (*field_name)(void*) = nullptr;
+    size_t (*field_offset)(void*) = nullptr;
     void (*field_get)(void*, void*, void*) = nullptr;
     void* (*field_get_object)(void*, void*) = nullptr;
     void (*field_static_get)(void*, void*) = nullptr;
+    void (*field_static_set)(void*, void*) = nullptr;
     void (*field_set)(void*, void*, void*) = nullptr;
     void (*field_set_object)(void*, void*, void*) = nullptr;
 
@@ -70,6 +75,7 @@ public:
     void* (*method_class)(void*) = nullptr;
     uint32_t (*method_count)(void*) = nullptr;
     void* (*method_param)(void*, uint32_t) = nullptr;
+    const char* (*method_param_name)(void*, uint32_t) = nullptr;
     void* (*method_return)(void*) = nullptr;
     uint32_t (*method_flags)(void*, uint32_t*) = nullptr;
     bool (*method_is_generic)(void*) = nullptr;
@@ -91,6 +97,8 @@ public:
     uint32_t (*gc_new)(void*, bool) = nullptr;
     void (*gc_free)(uint32_t) = nullptr;
     void* (*gc_target)(uint32_t) = nullptr;
+    void (*gchandle_foreach_target)(void (*)(void*, void*), void*) = nullptr;
+    void (*gc_foreach_heap)(void (*)(void*, void*), void*) = nullptr;
 
     // Binds every export and verifies that the runtime has finished starting up.
     void initialize();
