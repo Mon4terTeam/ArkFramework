@@ -1,5 +1,13 @@
 "use strict";
 
+(() => {
+  const pages = window.BetterBattlePages || (window.BetterBattlePages = {});
+  const operatorName = (id) =>
+    window.BetterBattlePages?.squad?.operatorName?.(id) ??
+    (typeof globalThis.operatorName === "function"
+      ? globalThis.operatorName(id)
+      : String(id || ""));
+
   function configTopicData(topicId) {
     return CONFIG_BY_TOPIC.get(String(topicId || "")) || CONFIG_TOPICS[0] || null;
   }
@@ -1289,3 +1297,44 @@
       (item) => String(item.id) === String(state.stage)) || topic.stages[0];
     return ROGUE_STAGE_BY_ID.get(String(stage.id)) || stage;
   }
+
+  pages.config = {
+    topicData: configTopicData,
+    entry: configEntry,
+    normalizeBattleConfig,
+    normalizeSkillLevels,
+    skillLevelsFor,
+    skillLevelFor,
+    skillLevelLabel,
+    truncate,
+    configIconMarkup,
+    configDifficultyLabel,
+    renderTopicList: renderConfigTopicList,
+    renderDifficulty: renderConfigDifficulty,
+    renderSummary: renderConfigSummary,
+    renderResources: renderConfigResources,
+    renderMasteries: renderConfigMasteries,
+    renderRelics: renderConfigRelics,
+    activeSpecialGroup: activeConfigSpecialGroup,
+    specialFamilyId,
+    specialLevelIndex,
+    specialVariantSlot,
+    specialVariantLabel,
+    specialFamilyKey,
+    specialSelectionFamily,
+    specialTierForGrade,
+    specialFamilies,
+    resolveSpecialItem,
+    selectedSpecialCount,
+    renderSpecials: renderConfigSpecials,
+    renderCopper: renderConfigCopper,
+    renderCharBuffs: renderConfigCharBuffs,
+    renderRunBuffCatalog,
+    renderRunBuffs: renderConfigRunBuffs,
+    renderConcepts: renderConfigConcepts,
+    renderTech: renderConfigTech,
+    render: renderConfig,
+    rogueConfigArgs,
+    stageForTopic: configStageForTopic,
+  };
+})();

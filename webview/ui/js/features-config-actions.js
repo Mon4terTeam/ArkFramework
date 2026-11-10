@@ -1,5 +1,24 @@
 "use strict";
 
+(() => {
+  const pages = window.BetterBattlePages || (window.BetterBattlePages = {});
+  const {
+    entry: configEntry,
+    stageForTopic: configStageForTopic,
+    topicData: configTopicData,
+    render: renderConfig,
+    renderCopper: renderConfigCopper,
+    resolveSpecialItem,
+    specialFamilies,
+    specialFamilyId,
+    specialLevelIndex,
+    specialSelectionFamily,
+    specialTierForGrade,
+    specialVariantSlot,
+  } = pages.config || {};
+  const stageLabel = (stage) =>
+    window.BetterBattlePages?.squad?.stageLabel?.(stage) || "";
+
   function setConfigEntry(topicId, patch) {
     const topic = configTopicData(topicId);
     if (!topic) return;
@@ -370,3 +389,26 @@
     };
     saveUi();
   }
+
+  pages.config = Object.assign(pages.config || {}, {
+    setEntry: setConfigEntry,
+    toggleCopper: toggleConfigCopper,
+    toggleCharBuff: toggleConfigCharBuff,
+    toggleCharBuffTarget: toggleConfigCharBuffTarget,
+    toggleRunBuff: toggleConfigRunBuff,
+    applyToSquad: applyConfigToSquad,
+    toggleRelic: toggleConfigRelic,
+    setRelicLayer: setConfigRelicLayer,
+    setResource: setConfigResource,
+    toggleMastery: toggleConfigMastery,
+    setMasteryLevel: setConfigMasteryLevel,
+    setMasteryZone: setConfigMasteryZone,
+    toggleSpecial: toggleConfigSpecial,
+    setSpecialVariant: setConfigSpecialVariant,
+    setSpecialAwake: setConfigSpecialAwake,
+    toggleTech: toggleConfigTech,
+    setTechAll: setConfigTechAll,
+    toggleConcept: toggleConfigConcept,
+    setConceptLayer: setConfigConceptLayer,
+  });
+})();

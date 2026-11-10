@@ -35,6 +35,18 @@
   <script defer src="js/timeline.js"></script>
 </head>
 <body>
+  <!-- app.js 安装错误上报前，先把加载期异常送回宿主日志。 -->
+  <script>
+    window.addEventListener("error", (event) => {
+      try {
+        window.chrome?.webview?.postMessage({
+          type: "log",
+          message: `EARLY ${event.message} @ ${event.filename}:${event.lineno}:${event.colno}`,
+        });
+      } catch {
+      }
+    });
+  </script>
   <div class="app">
     <header class="topbar">
       <div class="brand">

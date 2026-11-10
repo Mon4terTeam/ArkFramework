@@ -4,6 +4,20 @@
   const protocol = window.BetterBattleProtocol;
   const PANEL_ID = "page-gameview";
   const components = window.BetterBattleComponents || {};
+  const battle = window.BetterBattlePages?.battle || {};
+  const enemyPage = window.BetterBattlePages?.enemies || {};
+  const {
+    battleEntities,
+    unitForCard,
+    profileForCard,
+    staticArtFor,
+    buildUnitRailRows,
+    operatorDetailView,
+    buffHtml,
+    collectAbnormalChips,
+    abnormalChipsHtml,
+  } = battle;
+  const { enemyProfileFor, enemyStatRows } = enemyPage;
   const listState = {
     mode: "operators",
     active: false,

@@ -1,5 +1,9 @@
 "use strict";
 
+(() => {
+  const pages = window.BetterBattlePages || (window.BetterBattlePages = {});
+  const { collectAbnormalChips, renderAbnormalChips } = pages.battle || {};
+
   let lastEnemyFocusAt = 0;
   let lastEnemyFocusUid = 0;
 
@@ -395,3 +399,14 @@
       }).join("")
       : `<div class="empty-small">该关卡没有可读取的静态波次计划</div>`);
   }
+
+  pages.enemies = {
+    render: renderEnemies,
+    select: selectEnemy,
+    profileFor: enemyProfileFor,
+    statRows: enemyStatRows,
+    displayLabel: enemyDisplayLabel,
+    displayLabelByUid: enemyDisplayLabelByUid,
+    gameTextHtml,
+  };
+})();

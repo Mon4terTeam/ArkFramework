@@ -1,5 +1,11 @@
 "use strict";
 
+(() => {
+  const pages = window.BetterBattlePages || (window.BetterBattlePages = {});
+  const renderBattleDamagePanel = (uid) =>
+    window.BetterBattlePages?.damage?.renderBattlePanel?.(uid);
+  const { rosterEntry } = pages.squad || {};
+
   let battleEntitiesSnapshot;
   let battleEntitiesCache = null;
 
@@ -1263,3 +1269,21 @@
       ? parts.join("")
       : `<div class="empty-small">当前没有读取到全局效果</div>`);
   }
+
+  pages.battle = {
+    render: renderBattle,
+    selectCard,
+    selectSummon,
+    renderModuleTabs,
+    unitForCard,
+    profileForCard,
+    staticArtFor,
+    buildUnitRailRows,
+    operatorDetailView,
+    buffHtml,
+    collectAbnormalChips,
+    abnormalChipsHtml,
+    renderAbnormalChips,
+    battleEntities,
+  };
+})();

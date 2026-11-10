@@ -1,5 +1,14 @@
 "use strict";
 
+(() => {
+  const pages = window.BetterBattlePages || (window.BetterBattlePages = {});
+  const {
+    normalizeSkillLevels,
+    skillLevelsFor,
+    skillLevelFor,
+    skillLevelLabel,
+  } = pages.config || {};
+
   function stageLabel(stage) {
     if (!stage) return "";
     const code = String(stage.code || "").trim();
@@ -834,3 +843,53 @@
         }).join("")
       : `<div class="empty-small">没有匹配干员</div>`;
   }
+
+  pages.squad = {
+    stageLabel,
+    activeRogueTopic,
+    activeStageCatalog,
+    stageById,
+    stageTopicName,
+    filterStages,
+    resolveStageQuery,
+    stageFromSnapshot,
+    currentStageId,
+    selectedStage,
+    stageInputShowsSelectedLabel,
+    positionStageOptions,
+    renderStageOptions,
+    openStageDropdown,
+    closeStageDropdown,
+    selectStage,
+    moveStageActive,
+    renderStageField,
+    squadIndexOfOperator,
+    squadHasOperator,
+    firstEmptySquadIndex,
+    rosterEntry,
+    eliteCapsFor,
+    makeSquadSlot,
+    isSquadLocked,
+    battleInProgress,
+    syncSquadFromSnapshot,
+    serializeSquad,
+    catalogEntry,
+    operatorName,
+    skillCount,
+    moduleListFor,
+    addOperator,
+    removeOperator,
+    squadPortraitId,
+    squadSkillRail,
+    squadModuleStrip,
+    squadLevelControls,
+    renderSquadSlot,
+    renderSquadSelection,
+    render: renderSquad,
+    renderSquadPicker,
+    openSquadPicker,
+    closeSquadPicker,
+    renderRosterPreview,
+    renderQuickResults,
+  };
+})();

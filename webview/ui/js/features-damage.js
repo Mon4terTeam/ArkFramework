@@ -1,5 +1,9 @@
 "use strict";
 
+(() => {
+  const pages = window.BetterBattlePages || (window.BetterBattlePages = {});
+  const { operatorName } = pages.squad || {};
+
   function mergeDamagePayload(next) {
     if (!next || typeof next !== "object") return null;
     const previous = state.damage;
@@ -605,3 +609,10 @@
           }));
     }
   }
+
+  pages.damage = {
+    render: renderDamagePage,
+    renderBattlePanel: renderBattleDamagePanel,
+    mergePayload: mergeDamagePayload,
+  };
+})();
