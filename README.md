@@ -1,16 +1,14 @@
 # ArkFramework
 
-面向 Windows x64 / Unity IL2CPP 游戏的原生插件框架，以及基于它实现的游戏内伤害统计插件。加载器与伤害统计插件当前适配《明日方舟》PC 客户端（`Arknights.exe`）。
+面向 Windows x64 / Unity IL2CPP 游戏的原生插件框架。加载器与核心当前适配《明日方舟》PC 客户端（`Arknights.exe`）。本仓库是 [`wuyu8512/ArkFramework`](https://github.com/wuyu8512/ArkFramework) 的 fork。
 
 - **通用核心** `ArkFramework.dll`：插件动态加载、卸载与热重载，依赖与命名服务，游戏线程任务队列，共享 Dear ImGui 浮层，原生函数钩子及其安全排空。
 - **加载器** `ArkFrameworkLoader.exe`：等待游戏启动后用标准 `LoadLibraryExW` 载入核心，不修改游戏目录。
-- **伤害统计** `plugins/damage_meter.dll`：采集战斗伤害事件，按干员和伤害类型统计实际扣血与计算伤害，并导出 CSV。
+- **插件 SDK**：`include/ark/plugin.h`、`battle.h`、`external_bridge.h`。具体插件位于 `plugins/<name>/`，每个插件目录维护自己的 README。
 
 > 本项目仅供学习与研究。使用第三方工具可能违反游戏的用户协议，由此产生的一切后果由使用者自行承担。
 
-## 功能
-
-**核心**
+## 核心功能
 
 - `Insert` 统一显示/隐藏插件管理器及全部插件页面；隐藏时保留页面状态，后台采集与任务继续运行。管理器可查看状态，加载、卸载、重新加载插件，扫描插件目录。
 - 可开启“文件变化时热重载”；插件以影子副本加载，可直接覆盖重编的 DLL。
@@ -19,26 +17,37 @@
 - 统一 UI 缩放（50%–200%），只影响插件界面。
 - 日志、缓存与导出均位于核心所在目录下的 `logs`、`cache`、`exports`。
 
-**伤害统计**
+## 兼容性
 
-- 观察原生 `BattleLogger.LogModifier` / `LogEpModifier`，分别记录计算伤害（`finalDelta`）与实际扣血（`realDelta`）。
-- 按干员分组，展开显示物理、法术、真实、元素四类 HP 伤害；元素损伤累积单独记录，不计入 HP 伤害。
-- 固定按实际扣血降序排列；默认显示 DPS（实际扣血 ÷ 本次已统计的游戏时间），可用「显示 DPS」开关隐藏该列。
-- 显示关卡名、游戏时间与原生逻辑帧；角色、召唤物和关卡名称从游戏数据解析，失败时保留原始 ID。
-- 战斗结束自动导出 `exports\damage-<pid>-<battle>.csv`，也可手动导出。
-- 关闭窗口不停止采集；卸载插件会结束采集并丢弃本次历史，中途接入的战斗会标记为不完整。
+- 宿主 ABI 不变：`include/ark/plugin.h` 的 `ARK_ABI_VERSION` 仍为 1，`ArkPluginApiV1`、依赖声明和 `provide_service` / `require_service` 规则没有改动。
+- 战斗事件服务保留 ABI 1：`ArkBattleEventsApiV1` 和 `ArkEventV1` 的字段、布局、服务名都不变，旧消费者不需要重新编译或修改代码。
+- 新增 `ark.battle.events.v2`（ABI 2）：`ArkEventV2` 增加逻辑帧、帧内序号、目标、原始来源和召唤物宿主。新消费者必须显式请求 `ARK_BATTLE_SERVICE_NAME_V2`，不要把 ABI 2 的事件写进 ABI 1 的缓冲区。
+- 旧的事件 provider 继续随包构建和发布，同时注册 ABI 1 与 ABI 2 两套服务和测试服务；旧的 `ark.battle.test` 仍可用于旧测试宿主。
+- 框架不修改上游插件的入口约定；新增能力通过独立插件目录和新增服务名提供。
+- 不再兼容的部分只有新增能力本身：旧消费者拿不到 ABI 2 的帧内事件，需要改用 V2 服务名。其他旧接口保持原样。
+- 本地测试数据（`recordings/`、临时脚本、构建输出）不纳入提交。
+
+## 与上游的关系
+
+本仓库是 [`wuyu8512/ArkFramework`](https://github.com/wuyu8512/ArkFramework) 的 fork，分叉基点为 `26c5bc7`；上游当前 HEAD `94c616f` 只修改了 README 的许可证说明。
+
+- **ABI 兼容**：宿主 `ARK_ABI_VERSION` 保持 1，`plugin.h`、插件清单、依赖声明和 `provide_service` / `require_service` 规则与上游一致；上游的 ABI 1 插件可以直接加载。
+- **事件服务兼容**：ABI 1 的表、事件布局和服务名不变；V2 只新增 `ark.battle.events.v2`，不改旧服务。
+- **新增能力隔离**：本 fork 的功能插件位于独立目录，不替换上游组件的入口约定，也不要求上游插件改代码。
+- **构建差异**：以 CMake 为准；`build.ps1` / `package.ps1` 已扩展为包含本 fork 的组件。`run-test.ps1` 和 `webview/tools` 下的脚本属于本机测试/开发工具，不纳入提交。
+- **未验证项**：ABI 1 兼容是代码层面的保证；本 fork 的新插件在上游 core 上的实机行为尚未逐项验证，上游 core 也不会主动消费 V2 服务。同步上游后应重新跑事件模型测试和 `ArkFrameworkHost --self-test`。
 
 ## 目录结构
 
 ```text
-include/ark/            插件 SDK 头文件（plugin.h、battle.h、imgui_config.h）
+include/ark/            插件 SDK 头文件（plugin.h、battle.h、external_bridge.h、imgui_config.h）
 src/core/               核心：插件管理、原生钩子、D3D11 浮层与入口
 src/loader/             外部加载器 ArkFrameworkLoader.exe
 src/bootstrap/          窗口消息钩子引导 ArkBootstrap.dll（--method window-hook）
 plugins/common/         插件共用的 IL2CPP 运行时、Unity 输入适配与窗口布局
-plugins/damage_meter/   伤害统计插件
+plugins/<name>/         具体插件目录；每个目录自带 README
 tests/                  单元测试、生命周期与原生钩子测试、测试夹具、D3D11 测试宿主
-third_party/            Dear ImGui 1.91.9b、MinHook 1.3.4
+third_party/            Dear ImGui 1.91.9b、MinHook 1.3.4、nlohmann/json
 cmake/                  CMake 的 Zig 工具链文件
 docs/plugin-sdk.md      插件开发文档
 ```
@@ -46,6 +55,8 @@ docs/plugin-sdk.md      插件开发文档
 ## 构建
 
 需要 [Zig 0.15.2](https://ziglang.org/download/)（作为 C/C++ 编译器），放在 `PATH` 中或 `.tools\zig\ziglang\zig.exe`。
+
+`build.ps1` / `package.ps1` 已包含本 fork 的组件；`run-test.ps1` 是本机测试脚本，不纳入提交。
 
 ```powershell
 .\build.ps1                 # 运行测试并构建全部组件到 dist\
@@ -65,6 +76,8 @@ cmake --build build-cmake
 ctest --test-dir build-cmake --output-on-failure
 ```
 
+具体插件的构建目标见对应插件目录的 README。
+
 ## 使用
 
 发布目录结构如下，保持文件夹完整即可放在任意位置：
@@ -74,10 +87,12 @@ ArkFrameworkLoader.exe
 ArkFramework.dll
 ArkImGui.dll
 ArkBootstrap.dll
-plugins\damage_meter.dll
+plugins\
 LICENSE
 licenses\
 ```
+
+插件可能在 `plugins\` 下附带自己的运行时目录；以各插件 README 为准。
 
 双击 `ArkFrameworkLoader.exe`：
 
@@ -105,7 +120,7 @@ ArkFrameworkLoader.exe --self-test [--method ...] # 在测试宿主中验证加�
 
 `build.ps1` 会构建并运行：
 
-- `damage_meter_tests`：事件历史、统计模型与关卡名索引。
+- 事件模型测试：事件历史、统计模型与关卡名索引。
 - `lifecycle_tests`：使用真实 DLL 的加载、依赖、服务租约、热重载、失败恢复与回调排空。
 - `native_hook_tests`：共享钩子链、启用/禁用、跨线程卸载排空与原生返回。
 
@@ -120,12 +135,13 @@ ArkFrameworkLoader.exe --self-test [--method ...] # 在测试宿主中验证加�
 
 ## 插件开发
 
-见 [插件 SDK](docs/plugin-sdk.md)。
+见 [插件 SDK](docs/plugin-sdk.md)。插件应放在 `plugins/<name>/`，并在该目录维护自己的 README。
 
 ## 第三方组件
 
 - [Dear ImGui](https://github.com/ocornut/imgui) v1.91.9b — MIT。DX11 后端改为运行时从 System32 加载 `D3DCompile`，并支持 `FramebufferScale` 缩放；Win32 后端按同一比例换算坐标。
 - [MinHook](https://github.com/TsudaKageyu/minhook) v1.3.4 — BSD 2-Clause。
+- [nlohmann/json](https://github.com/nlohmann/json) — MIT，单头文件版本。
 
 第三方许可证全文位于各自目录，并随发布包复制到 `licenses\`。插件生命周期与绘制回调的设计参考了 [REFramework](https://github.com/praydog/REFramework)。
 
