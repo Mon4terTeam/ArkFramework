@@ -6,6 +6,7 @@
   const selectCard = battlePage.selectCard || (() => {});
   const selectSummon = battlePage.selectSummon || (() => {});
   const renderModuleTabs = battlePage.renderModuleTabs || (() => {});
+  const renderBattleRightTabs = battlePage.renderRightTabs || (() => {});
   const enemyPage = pages.enemies || {};
   const renderEnemies = enemyPage.render || (() => {});
   const selectEnemy = enemyPage.select || (() => {});
@@ -832,26 +833,6 @@
     renderBattleRightTabs();
     renderResultEvent();
     renderActivePage();
-  }
-
-  function renderBattleRightTabs() {
-    const tabs = ["stats", "buffs", "global"];
-    const active = tabs.includes(state.battleRightTab)
-      ? state.battleRightTab
-      : "stats";
-    dom.battleRightTabs?.querySelectorAll("button[data-tab]").forEach((button) => {
-      const selected = button.dataset.tab === active;
-      button.classList.toggle("is-active", selected);
-      button.setAttribute("aria-selected", selected ? "true" : "false");
-    });
-    for (const key of tabs) {
-      const page = {
-        stats: dom.battleRightStats,
-        buffs: dom.battleRightBuffs,
-        global: dom.battleRightGlobal,
-      }[key];
-      page?.classList.toggle("is-active", key === active);
-    }
   }
 
   function renderSnapshotPage() {

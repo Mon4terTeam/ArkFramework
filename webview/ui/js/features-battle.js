@@ -1270,8 +1270,29 @@
       : `<div class="empty-small">当前没有读取到全局效果</div>`);
   }
 
+  function renderBattleRightTabs() {
+    const tabs = ["stats", "buffs", "global"];
+    const active = tabs.includes(state.battleRightTab)
+      ? state.battleRightTab
+      : "stats";
+    dom.battleRightTabs?.querySelectorAll("button[data-tab]").forEach((button) => {
+      const selected = button.dataset.tab === active;
+      button.classList.toggle("is-active", selected);
+      button.setAttribute("aria-selected", selected ? "true" : "false");
+    });
+    for (const key of tabs) {
+      const page = {
+        stats: dom.battleRightStats,
+        buffs: dom.battleRightBuffs,
+        global: dom.battleRightGlobal,
+      }[key];
+      page?.classList.toggle("is-active", key === active);
+    }
+  }
+
   pages.battle = {
     render: renderBattle,
+    renderRightTabs: renderBattleRightTabs,
     selectCard,
     selectSummon,
     renderModuleTabs,
