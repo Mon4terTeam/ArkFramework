@@ -152,7 +152,7 @@ HRESULT STDMETHODCALLTYPE Overlay::resize_buffers_detour(IDXGISwapChain* chain, 
                                                          UINT width, UINT height,
                                                          DXGI_FORMAT format, UINT flags) {
     Overlay* self = instance_;
-    std::lock_guard lock(self->mutex_);
+    std::unique_lock lock(self->mutex_);
     // ResizeBuffers fails while any back-buffer reference is outstanding.
     if (chain == self->swap_chain_ && self->render_target_) {
         self->render_target_->Release();
@@ -162,6 +162,7 @@ HRESULT STDMETHODCALLTYPE Overlay::resize_buffers_detour(IDXGISwapChain* chain, 
         ImGui::SetCurrentContext(self->imgui_);
         ImGui_ImplDX11_InvalidateDeviceObjects();
     }
+    lock.unlock();
     return self->original_resize_buffers_(chain, buffer_count, width, height, format, flags);
 }
 

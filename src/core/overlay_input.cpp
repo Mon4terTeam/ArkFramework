@@ -42,64 +42,77 @@ LRESULT CALLBACK Overlay::window_proc(HWND window, UINT message, WPARAM wparam, 
 }
 
 LRESULT Overlay::handle_window_message(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
-    std::lock_guard lock(mutex_);
-    const auto found = window_procs_.find(window);
-    const WNDPROC previous = found == window_procs_.end() ? previous_window_proc_ : found->second;
+    WNDPROC previous = nullptr;
+    bool handled = false;
+    LRESULT result = 0;
+    {
+        std::lock_guard lock(mutex_);
+        const auto found = window_procs_.find(window);
+        previous = found == window_procs_.end() ? previous_window_proc_ : found->second;
 
-    // Alt+F4 always reaches the application untouched.
-    if ((message == WM_SYSKEYDOWN || message == WM_SYSKEYUP) && wparam == VK_F4) {
-        return forward_message(previous, window, message, wparam, lparam);
-    }
+        // Alt+F4 always reaches the application untouched.
+        if (!((message == WM_SYSKEYDOWN || message == WM_SYSKEYUP) && wparam == VK_F4)) {
+            const bool toggle = message == WM_KEYUP && wparam == kOverlayToggleKey;
+            if (toggle) {
+                overlay_visible_ = !overlay_visible_;
+                if (overlay_visible_) {
+                    menu_visible_ = true;
+                }
+            }
 
-    const bool toggle = message == WM_KEYUP && wparam == kOverlayToggleKey;
-    if (toggle) {
-        overlay_visible_ = !overlay_visible_;
-        if (overlay_visible_) {
-            menu_visible_ = true;
-        }
-    }
+            if (window == window_ && ready_ && !stopping_) {
+                ImGui::SetCurrentContext(imgui_);
+                if (toggle && !overlay_visible_) {
+                    // A hidden widget must not retain keyboard focus or an active drag.
+                    ImGui::ClearActiveID();
+                    ImGui::SetWindowFocus(nullptr);
+                }
+                ImGui_ImplWin32_WndProcHandler(window, message, wparam, lparam);
 
-    if (window == window_ && ready_ && !stopping_) {
-        ImGui::SetCurrentContext(imgui_);
-        if (toggle && !overlay_visible_) {
-            // A hidden widget must not retain keyboard focus or an active drag.
-            ImGui::ClearActiveID();
-            ImGui::SetWindowFocus(nullptr);
-        }
-        ImGui_ImplWin32_WndProcHandler(window, message, wparam, lparam);
+                bool mouse_capture = false;
+                if (message == WM_KILLFOCUS) {
+                    plugins_.set_input_capture(false, false);
+                } else {
+                    mouse_capture = publish_input_capture(message, lparam);
+                }
+                const bool owned = plugins_.route_window_input(message, wparam, lparam);
+                if (toggle) {
+                    handled = true;
+                } else if (owned) {
+                    handled = true;
+                    result = 1;
+                } else {
+                    // With polling protection installed, ownership decides
+                    // button/key releases, so a game-origin control cannot lose
+                    // its Win32 Up message.
+                    const bool routed = plugins_.input_protected();
+                    if (is_mouse_message(message) && mouse_capture) {
+                        if (!routed || !is_mouse_button_release(message)) {
+                            handled = true;
+                            result = 1;
+                        }
+                    } else if (is_keyboard_message(message) && overlay_visible_ &&
+                               ImGui::GetIO().WantCaptureKeyboard) {
+                        if (!routed || !is_key_release(message)) {
+                            handled = true;
+                            result = 1;
+                        }
+                    }
+                }
+            }
 
-        bool mouse_capture = false;
-        if (message == WM_KILLFOCUS) {
-            plugins_.set_input_capture(false, false);
-        } else {
-            mouse_capture = publish_input_capture(message, lparam);
-        }
-        const bool owned = plugins_.route_window_input(message, wparam, lparam);
-        if (toggle) {
-            return 0;
-        }
-        if (owned) {
-            return 1;
-        }
-
-        // With polling protection installed, ownership decides button/key
-        // releases, so a game-origin control cannot lose its Win32 Up message.
-        const bool routed = plugins_.input_protected();
-        if (is_mouse_message(message) && mouse_capture) {
-            if (!routed || !is_mouse_button_release(message)) {
-                return 1;
+            if (!handled && toggle) {
+                handled = true;
             }
         }
-        if (is_keyboard_message(message) && overlay_visible_ && ImGui::GetIO().WantCaptureKeyboard) {
-            if (!routed || !is_key_release(message)) {
-                return 1;
-            }
-        }
     }
 
-    if (toggle) {
-        return 0;
+    if (handled) {
+        return result;
     }
+    // Never hold mutex_ across the application's window procedure: dragging a
+    // window enters DefWindowProc's modal move loop, while Present waits for
+    // the same render lock on another thread.
     return forward_message(previous, window, message, wparam, lparam);
 }
 

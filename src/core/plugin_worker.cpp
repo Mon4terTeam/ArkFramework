@@ -49,18 +49,23 @@ void PluginManager::start() {
     if (running_.exchange(true)) {
         return;
     }
+    log(kLogInfo, "Plugin manager scanning " + root_utf8_ + "\\plugins");
+    scan();
+    log(kLogInfo, "Plugin manager initial scan complete");
     worker_ = std::thread([this] {
         try {
             run();
         } catch (const std::exception& error) {
             log(kLogError, std::string("Plugin worker: ") + error.what());
             running_ = false;
+        } catch (...) {
+            log(kLogError, "Plugin worker: unknown exception");
+            running_ = false;
         }
     });
 }
 
 void PluginManager::run() {
-    scan();
     DirectoryWatch watch;
     while (running_) {
         process_requests();
