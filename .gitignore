@@ -12,3 +12,18 @@
 # Local toolchain, scratch files and notes
 /.tools/
 __pycache__/
+/webview/bin/
+/webview/obj/
+/webview/art_cache/
+
+# Local test automation and development-only scripts
+/run-test.ps1
+/webview/tools/*.ps1
+/_tmp_*.js
+/NUL
+/recordings/
+
+# Local-only plugins and their notes
+/plugins/auto_login/
+/plugins/battle_cheat/
+/docs/BattleCheatSettlementDiagnosis.md
