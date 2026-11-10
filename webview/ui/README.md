@@ -34,10 +34,10 @@ Rules:
 - A page may call an earlier page only through `window.BetterBattlePages`.
 - Later pages are reached lazily, e.g.
   `window.BetterBattlePages.damage?.renderBattlePanel(uid)`.
-- `app.js` aliases page APIs to its historical local names so routing and
-  event handlers stay unchanged.
-- Shared UI state (`state`), DOM lookup (`dom`) and formatting helpers still
-  live in `app.js`; moving them into a `core/` module is the next step.
+- `app.js` is the composition root and is loaded last. It owns shared UI state
+  (`state`), DOM lookup (`dom`), formatting helpers, routing, event delegation
+  and the page API aliases. Page scripts only touch that context inside their
+  render/event functions, never while the script is being evaluated.
 
 ## Page APIs
 
