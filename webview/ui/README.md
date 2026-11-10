@@ -8,7 +8,7 @@ Scripts are classic (non-module) scripts loaded in this order:
 2. kernel modules: `protocol.js`, `buff-catalog.js`, `asset-loader.js`, `session.js`
 3. page modules: `features-config.js`, `features-config-actions.js`,
    `features-squad.js`, `features-battle.js`, `features-damage.js`,
-   `features-enemies.js`
+   `features-enemies.js`, `features-diagnostics.js`
 4. UI components and the game-view page
 5. `app.js` (shared UI state, routing, event delegation, page API aliases)
 6. `timeline.js` (self-contained)
@@ -48,6 +48,7 @@ Rules:
   presentation helpers.
 - `pages.damage`: damage page and battle-side damage panel.
 - `pages.enemies`: enemy page rendering plus enemy profile/stat lookups.
+- `pages.diagnostics`: diagnostics page, trace badges and event log rendering.
 - `window.BetterBattleGameView`: game-view page (`init/enter/leave/render`).
 - `window.BetterBattleTimeline`: frame timeline (`render/onTabActivated`).
 
