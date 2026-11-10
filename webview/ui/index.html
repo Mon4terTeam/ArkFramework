@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="css/base.css">
   <link rel="stylesheet" href="css/battle.css">
   <link rel="stylesheet" href="css/battle-cards.css">
+  <link rel="stylesheet" href="css/gameview.css">
   <link rel="stylesheet" href="css/squad.css">
   <link rel="stylesheet" href="css/squad-slots.css">
   <link rel="stylesheet" href="css/damage.css">
@@ -28,6 +29,8 @@
   <script defer src="js/features-battle.js"></script>
   <script defer src="js/features-damage.js"></script>
   <script defer src="js/features-enemies.js"></script>
+  <script defer src="js/components.js"></script>
+  <script defer src="js/features-gameview.js"></script>
   <script defer src="js/app.js"></script>
   <script defer src="js/timeline.js"></script>
 </head>
@@ -39,6 +42,7 @@
       </div>
       <nav id="nav" class="nav topnav">
         <button class="nav-item active" data-tab="battle">战斗</button>
+        <button class="nav-item" data-tab="gameview">游戏视图</button>
         <button class="nav-item" data-tab="enemies">敌方</button>
         <button class="nav-item" data-tab="squad">编队</button>
         <button class="nav-item" data-tab="config">战斗配置</button>
@@ -196,6 +200,63 @@
                 </article>
               </div>
           </div>
+          </div>
+        </section>
+
+        <section class="page" id="page-gameview">
+          <div class="gameview-toolbar">
+            <div class="gameview-toolbar-state">
+              <span class="badge" id="gameviewHostState">未吸附</span>
+              <span class="gameview-toolbar-hint" id="gameviewHostHint">
+                游戏窗口保持独立，点击“吸附游戏”后进入布局
+              </span>
+            </div>
+            <div class="button-row">
+              <button class="btn primary" id="gameviewAttachButton" type="button">吸附游戏</button>
+              <button class="btn ghost" id="gameviewDetachButton" type="button" disabled>解除吸附</button>
+            </div>
+          </div>
+          <div class="gameview-layout">
+            <aside class="panel gameview-rail">
+              <div class="panel-head gameview-rail-head">
+                <div class="battle-right-tabs gameview-list-tabs" id="gameviewListTabs"
+                  role="tablist" aria-label="游戏视图列表">
+                  <button type="button" class="is-active" data-gameview-list="operators"
+                    role="tab" aria-selected="true">干员</button>
+                  <button type="button" data-gameview-list="enemies"
+                    role="tab" aria-selected="false">敌方</button>
+                </div>
+                <span class="badge" id="gameviewListCount">0</span>
+              </div>
+              <div class="gameview-rail-list" id="gameviewRailList">
+                <div class="empty-small">等待战斗数据</div>
+              </div>
+            </aside>
+
+            <div class="gameview-stage">
+              <div class="gameview-game-hole" id="gameviewGameHole">
+                <div class="gameview-game-placeholder" id="gameviewGamePlaceholder">
+                  <strong>游戏窗口尚未吸附</strong>
+                  <small>点击上方“吸附游戏”显示游戏；离开本页时会自动暂停并恢复原窗口。</small>
+                </div>
+              </div>
+            </div>
+
+            <aside class="panel gameview-detail">
+              <div class="panel-head">
+                <div class="gameview-detail-title">
+                  <span class="section-label" id="gameviewDetailKind">干员详情</span>
+                  <h3 id="gameviewDetailName">未选择单位</h3>
+                  <span class="gameview-detail-meta" id="gameviewDetailMeta"></span>
+                </div>
+                <span class="badge" id="gameviewDetailBadge">--</span>
+              </div>
+              <div class="gameview-detail-body" id="gameviewDetailBody">
+                <div class="empty-small">等待游戏数据</div>
+              </div>
+            </aside>
+
+            <div class="gameview-timeline-host" id="gameviewTimelineHost"></div>
           </div>
         </section>
 
@@ -557,14 +618,20 @@
               <button class="btn tiny" data-step="-30" type="button" title="指针回退 1 秒">−30</button>
               <button class="btn tiny" data-step="-1" type="button" title="指针回退 1 帧">−1</button>
               <button class="btn tiny" id="playButton" type="button" aria-label="刷新时间轴" title="刷新时间轴">↻</button>
-              <button class="btn tiny" data-action="pause" type="button" title="暂停逻辑帧推进">暂停</button>
-              <button class="btn tiny primary" data-action="resume" type="button" title="继续逻辑帧推进">继续</button>
+              <button class="btn tiny" id="followPlayback" type="button"
+                      title="回到当前录像播放位置并持续跟随">跟随录像</button>
+              <button class="btn tiny" id="timelinePauseButton" data-action="pause" type="button" title="暂停逻辑帧推进">暂停</button>
+              <button class="btn tiny primary" id="timelineResumeButton" data-action="resume" type="button" title="继续逻辑帧推进">继续</button>
               <button class="btn tiny" data-step="1" type="button" title="指针前进 1 帧">+1</button>
               <button class="btn tiny" data-step="30" type="button" title="指针前进 1 秒">+30</button>
               <button class="btn tiny" id="jumpEnd" type="button" title="跳到时间段末尾（只移动指针）">▶|</button>
               <button class="btn tiny tas-split" id="splitBranch" type="button"
-                      title="重放至当前帧、暂停后继续录制">
-                回退并分叉
+                      title="重新开局并回退到当前帧">
+                回退到指针
+              </button>
+              <button class="btn tiny tas-split" id="rewindPlay" type="button"
+                      title="重新开局并回退到当前帧，然后继续播放录像">
+                回退并播放
               </button>
               <span class="tas-jump-mode" role="group" aria-label="回退模式">
                 <button class="btn tiny is-active" id="jumpModeNormal" type="button"
@@ -600,6 +667,9 @@
                     <div class="tas-cursor" id="cursor" hidden>
                       <span id="cursorFlag">F00000</span>
                     </div>
+                    <div class="tas-game-cursor" id="gameCursor" hidden>
+                      <span id="gameCursorFlag">实际 F00000</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -610,7 +680,7 @@
                 <span><i class="operation"></i>玩家操作</span>
                 <span><i class="combat"></i>伤害采样</span>
               </span>
-              <span class="tas-foot-note" id="treeHint">点击节点选帧；双击重命名</span>
+              <span class="tas-foot-note" id="treeHint">点击节点选帧；点击当前子树连接线选择播放分支；双击重命名</span>
             </div>
           </article>
 

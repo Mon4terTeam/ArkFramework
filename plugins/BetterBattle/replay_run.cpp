@@ -58,7 +58,23 @@ bool LocalBattle::remove_replay_hook() {
 void LocalBattle::stop_replay() {
     cancel_timeline_fast_forward();
     const bool was_active = replay_active_.exchange(false, std::memory_order_acq_rel);
-    replay_branch_armed_.store(false, std::memory_order_release);
+    std::uint32_t frame = replay_frame_;
+    if (replay_frame_get_ && replay_frame_method_) {
+        try {
+            frame = replay_frame_get_(replay_frame_method_);
+        } catch (...) {
+        }
+    }
+    if (!replay_steps_.empty()) {
+        record_active_.store(true, std::memory_order_release);
+        {
+            std::lock_guard lock(record_mutex_);
+            frame_actual_operations_.clear();
+            frame_prepared_ =
+                std::numeric_limits<std::uint32_t>::max();
+            frame_policy_ = TimelineFramePolicy::CompareOnly;
+        }
+    }
     const std::uint32_t dispatched = replay_dispatched_;
     replay_stop_frame_.store(0, std::memory_order_release);
     replay_stop_enabled_.store(false, std::memory_order_release);
@@ -66,6 +82,7 @@ void LocalBattle::stop_replay() {
     pending_replay_seek_target_.store(0, std::memory_order_release);
     pending_timeline_jump_ = false;
     pending_timeline_fast_ = false;
+    pending_timeline_play_ = false;
     pending_timeline_parent_id_.clear();
     remove_replay_hook();
     if (was_active) {

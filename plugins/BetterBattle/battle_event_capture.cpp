@@ -98,6 +98,8 @@ struct BattleEventCapture::Bindings {
     std::size_t target_hp_offset = 0;
     std::size_t minus_hp_offset = 0;
     std::size_t real_delta_offset = 0;
+    std::size_t instance_uid_offset = 0;
+    bool has_instance_uid = false;
 
     static void* entry_point(void* method) {
         return *static_cast<void**>(method);
@@ -192,12 +194,39 @@ struct BattleEventCapture::Bindings {
         logger_controller_field = runtime.field(logger_class, "m_controller");
         battle_state_field = runtime.field(battle_controller_class, "m_state");
 
+        void* uid_field = nullptr;
+        for (void* current = entity_class; current;
+             current = runtime.class_parent(current)) {
+            uid_field = runtime.class_field(
+                current, "<instanceUid>k__BackingField");
+            if (uid_field) {
+                break;
+            }
+        }
+        if (!uid_field) {
+            throw std::runtime_error("Unsupported Entity.instanceUid layout");
+        }
+        instance_uid_offset =
+            static_cast<std::size_t>(runtime.field_offset(uid_field));
+        has_instance_uid = true;
+
         void* fixed_point_class = runtime.find("Torappu", "FP");
         const std::int64_t one =
             runtime.static_value<std::int64_t>(fixed_point_class, "ONE");
         if (one != kFixedPointOneRaw) {
             throw std::runtime_error("Unsupported fixed point scale");
         }
+    }
+
+    std::uint32_t instance_uid(void* object) const {
+        if (!object || !has_instance_uid) {
+            return 0;
+        }
+        std::uint32_t uid = 0;
+        std::memcpy(&uid,
+                    static_cast<const char*>(object) + instance_uid_offset,
+                    sizeof(uid));
+        return uid;
     }
 };
 
@@ -526,12 +555,16 @@ void BattleEventCapture::record_regen(void* entity, double amount) {
     if (id.empty()) {
         return;
     }
+    const std::uint32_t uid = bindings_->instance_uid(entity);
     std::lock_guard lock(regen_mutex_);
-    regen_pending_[id] += amount;
+    PendingRegen& pending = regen_pending_[id + '\x1f' + std::to_string(uid)];
+    pending.id = id;
+    pending.uid = uid;
+    pending.amount += amount;
 }
 
 void BattleEventCapture::flush_regen() {
-    std::unordered_map<std::string, double> pending;
+    std::unordered_map<std::string, PendingRegen> pending;
     {
         std::lock_guard lock(regen_mutex_);
         pending.swap(regen_pending_);
@@ -541,18 +574,21 @@ void BattleEventCapture::flush_regen() {
     }
     const std::uint32_t frame = current_frame();
     const double now = game_clock();
-    for (const auto& [id, amount] : pending) {
-        if (amount <= 0.0001) {
+    for (const auto& [key, regen] : pending) {
+        (void)key;
+        if (regen.amount <= 0.0001) {
             continue;
         }
         ArkBattleEvent event;
         event.kind = ArkBattleEventKind::Regen;
         event.frame = frame;
         event.game_time = now;
-        event.calculated_delta = amount;
-        event.applied_delta = amount;
-        event.source_id = id;
-        event.target_id = id;
+        event.calculated_delta = regen.amount;
+        event.applied_delta = regen.amount;
+        event.source_id = regen.id;
+        event.source_uid = regen.uid;
+        event.target_id = regen.id;
+        event.target_uid = regen.uid;
         event.hp_after = 0;
         event.hp_delta = 0;
         event.hp_effective_after = 0;
@@ -627,11 +663,13 @@ void BattleEventCapture::record_modifier(void* logger, void* modifier, bool elem
     if (source) {
         event.source_id = runtime_.string(
             il2cpp.character_id(source, il2cpp.character_id_info));
+        event.source_uid = il2cpp.instance_uid(source);
     }
     void* target = il2cpp.target(modifier, il2cpp.target_info);
     if (target) {
         event.target_id = runtime_.string(
             il2cpp.entity_id(target, il2cpp.entity_id_info));
+        event.target_uid = il2cpp.instance_uid(target);
         {
             std::int64_t hp_raw = 0;
             std::memcpy(&hp_raw,
@@ -666,6 +704,7 @@ void BattleEventCapture::record_modifier(void* logger, void* modifier, bool elem
     if (original_source) {
         event.original_source_id = runtime_.string(
             il2cpp.entity_id(original_source, il2cpp.entity_id_info));
+        event.original_source_uid = il2cpp.instance_uid(original_source);
     }
 
     if (!event.source_id.empty() && il2cpp.is_token && il2cpp.fetch_host) {

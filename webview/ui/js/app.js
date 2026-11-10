@@ -3,6 +3,7 @@
   const MAX_SLOTS = 14;
   const DEFAULT_SQUAD_LIMIT = 12;
   const protocol = window.BetterBattleProtocol;
+  const session = window.BetterBattleSession;
   const UI_STATE_VERSION = 2;
   const STORAGE_KEY = "betterbattle.ui.v1";
   const TIME_UNIT_STORAGE_KEY = "betterbattle.timeUnit.v1";
@@ -229,17 +230,32 @@
 
   const saved = loadSaved();
   const state = {
-    snapshot: null,
-    catalog: [],
-    catalogById: new Map(),
-    profiles: new Map(),
+    get snapshot() {
+      return session?.snapshot || null;
+    },
+    get catalog() {
+      return session?.catalog || [];
+    },
+    get catalogById() {
+      return session?.catalogById || new Map();
+    },
+    get profiles() {
+      return session?.profiles || new Map();
+    },
     hostConnected: false,
     requestPath: "BetterBattle.request",
-    lastSnapshotAt: 0,
-    lastResult: null,
+    get lastSnapshotAt() {
+      return session?.lastSnapshotAt || 0;
+    },
+    resultRevisionSeen: 0,
     activeTab: "battle",
     moduleTab: "talent",
-    selectedCardUid: null,
+    get selectedCardUid() {
+      return session?.selection.cardUid ?? null;
+    },
+    set selectedCardUid(value) {
+      if (session) session.selection.cardUid = value;
+    },
     artKey: null,
     squad: saved.squad,
     savedSquad: cloneSquad(saved.squad),
@@ -250,7 +266,9 @@
     pickerOpen: false,
     pickerTarget: null,
     pickerQuery: "",
-    replayActive: false,
+    get replayActive() {
+      return session ? session.replayActive() : false;
+    },
     stage: saved.stage,
     savedStage: saved.stage,
     stageSynced: false,
@@ -271,11 +289,21 @@
     stageActiveIndex: -1,
     events: [],
     unitRailKey: "",
-    selectedSummonUid: null,
+    get selectedSummonUid() {
+      return session?.selection.summonUid ?? null;
+    },
+    set selectedSummonUid(value) {
+      if (session) session.selection.summonUid = value;
+    },
     focusActionsKey: "",
     damage: null,
     selectedDamageId: null,
-    selectedEnemyUid: null,
+    get selectedEnemyUid() {
+      return session?.selection.enemyUid ?? null;
+    },
+    set selectedEnemyUid(value) {
+      if (session) session.selection.enemyUid = value;
+    },
     pageStatsMode: "damage",
     battleStatsMode: "damage",
     battleRightTab: "stats",
@@ -727,7 +755,7 @@
       return false;
     }
     const current = state.snapshot;
-    if (current?.available && current?.playing) {
+    if (session?.requiresRestartConfirmation(current)) {
       if (!await confirmAction({
         kicker: "BATTLE CONTROL",
         title: "重新进入战斗",
@@ -754,8 +782,9 @@
 
   function renderResultEvent() {
     const snapshot = state.snapshot;
-    if (snapshot?.result && snapshot.result !== state.lastResult) {
-      state.lastResult = snapshot.result;
+    const revision = session?.resultRevision || 0;
+    if (snapshot?.result && revision !== state.resultRevisionSeen) {
+      state.resultRevisionSeen = revision;
       addEvent((snapshot.ok ? "✓ " : "✗ ") + snapshot.result, snapshot.ok ? "" : "error");
     }
   }
@@ -799,6 +828,9 @@
     case "battle":
       renderBattle();
       break;
+    case "gameview":
+      window.BetterBattleGameView?.render();
+      break;
     case "enemies":
       renderEnemies();
       break;
@@ -836,6 +868,9 @@
     case "battle":
       renderBattle();
       break;
+    case "gameview":
+      window.BetterBattleGameView?.render();
+      break;
     case "enemies":
       renderEnemies();
       break;
@@ -862,6 +897,10 @@
   }
 
   function switchTab(tab) {
+    const previous = state.activeTab;
+    if (previous === "gameview" && tab !== "gameview") {
+      window.BetterBattleGameView?.leave();
+    }
     state.activeTab = tab;
     document.querySelectorAll(".nav-item").forEach((node) => {
       node.classList.toggle("active", node.dataset.tab === tab);
@@ -874,6 +913,9 @@
     syncTimeUnitButtons();
     if (tab === "timeline") {
       window.BetterBattleTimeline?.onTabActivated();
+    }
+    if (tab === "gameview" && previous !== "gameview") {
+      window.BetterBattleGameView?.enter();
     }
   }
 
@@ -925,6 +967,66 @@
     }
   }
 
+  function handleCatalogMessage() {
+    state.hostConnected = true;
+    addEvent(`目录 ${state.catalog.length} 条`);
+    renderActivePage();
+  }
+
+  function handleProfilesMessage() {
+    state.hostConnected = true;
+    state.artKey = null;
+    renderAll();
+  }
+
+  function handleSnapshotMessage(payload, previous) {
+    state.hostConnected = true;
+    if (payload.damage) {
+      state.damage = mergeDamagePayload(payload.damage);
+    }
+    const replayWasActive = session ? session.replayActive(previous) : false;
+    const replayActive = session
+      ? session.replayActive(payload)
+      : !!payload.replay?.active;
+    let squadChanged = false;
+    const reportedLimit = Number(
+      payload.squad_limit ?? payload.squadLimit,
+    );
+    if (Number.isFinite(reportedLimit)) {
+      const nextLimit = clampInt(reportedLimit, 1, MAX_SLOTS, state.squadLimit);
+      if (nextLimit !== state.squadLimit) {
+        state.squadLimit = nextLimit;
+        if (!replayActive) saveUi();
+        squadChanged = true;
+      }
+    }
+    if (replayActive || battleInProgress(payload)) {
+      closeSquadPicker();
+      if (syncSquadFromSnapshot(payload.squad)) {
+        state.squadSynced = true;
+        squadChanged = true;
+      }
+    } else {
+      if (state.squadSynced) {
+        state.squad = cloneSquad(state.savedSquad);
+        state.squadSynced = false;
+        state.selectedSquadIndex = state.squad.findIndex(Boolean);
+        squadChanged = true;
+      }
+      if (state.stageSynced) {
+        state.stage = state.savedStage;
+        state.stageSynced = false;
+      }
+    }
+    if (squadChanged || replayWasActive !== replayActive) {
+      if (state.activeTab === "squad") {
+        renderSquad();
+        renderQuickResults();
+      }
+    }
+    scheduleSnapshotRender();
+  }
+
   function receive(event) {
     let message = event.data;
     if (typeof message === "string") {
@@ -952,74 +1054,6 @@
     if (message.type === protocol.Message.Command) {
       handleCommandMessage(message);
       return;
-    }
-    if (message.topic === protocol.Topic.Catalog && message.payload) {
-      state.hostConnected = true;
-      state.catalog = (Array.isArray(message.payload.operators) ? message.payload.operators : [])
-        .filter((entry) => String(entry?.id || "").startsWith("char_"));
-      state.catalogById = new Map(state.catalog.map((entry) => [entry.id, entry]));
-      addEvent(`目录 ${state.catalog.length} 条`);
-      renderActivePage();
-      return;
-    }
-    if (message.topic === protocol.Topic.Profiles && message.payload) {
-      state.hostConnected = true;
-      state.profiles = new Map();
-      for (const profile of message.payload.profiles || []) {
-        if (profile && profile.key !== undefined) {
-          state.profiles.set(String(profile.key), profile);
-        }
-      }
-      state.artKey = null;
-      renderAll();
-      return;
-    }
-    if (message.topic === protocol.Topic.Snapshot && message.payload) {
-      state.hostConnected = true;
-      state.snapshot = window.BetterBattleSession?.snapshot || message.payload;
-      if (message.payload.damage) {
-        state.damage = mergeDamagePayload(message.payload.damage);
-      }
-      state.lastSnapshotAt = Date.now();
-      const replayWasActive = state.replayActive;
-      state.replayActive = !!message.payload.replay?.active;
-      let squadChanged = false;
-      const reportedLimit = Number(
-        message.payload.squad_limit ?? message.payload.squadLimit,
-      );
-      if (Number.isFinite(reportedLimit)) {
-        const nextLimit = clampInt(reportedLimit, 1, MAX_SLOTS, state.squadLimit);
-        if (nextLimit !== state.squadLimit) {
-          state.squadLimit = nextLimit;
-          if (!state.replayActive) saveUi();
-          squadChanged = true;
-        }
-      }
-      if (state.replayActive || battleInProgress(message.payload)) {
-        closeSquadPicker();
-        if (syncSquadFromSnapshot(message.payload.squad)) {
-          state.squadSynced = true;
-          squadChanged = true;
-        }
-      } else {
-        if (state.squadSynced) {
-          state.squad = cloneSquad(state.savedSquad);
-          state.squadSynced = false;
-          state.selectedSquadIndex = state.squad.findIndex(Boolean);
-          squadChanged = true;
-        }
-        if (state.stageSynced) {
-          state.stage = state.savedStage;
-          state.stageSynced = false;
-        }
-      }
-      if (squadChanged || replayWasActive !== state.replayActive) {
-        if (state.activeTab === "squad") {
-          renderSquad();
-          renderQuickResults();
-        }
-      }
-      scheduleSnapshotRender();
     }
   }
 
@@ -1338,7 +1372,7 @@
       });
       renderConfig();
     } else if (action === "config-apply") {
-      if (applyConfigToSquad() && await startBattle()) switchTab("battle");
+      if (applyConfigToSquad() && await startBattle()) switchTab("gameview");
     } else if (action === "config-reset") {
       const topic = configTopicData(state.configTopic);
       if (!topic) return;
@@ -1378,7 +1412,7 @@
         switchTab("config");
         return;
       }
-      await startBattle();
+      if (await startBattle()) switchTab("gameview");
     } else if (action === "trace-start") {
       const fields = Array.from(dom.traceFields.querySelectorAll("input:checked"))
         .map((input) => input.value);
@@ -1791,13 +1825,19 @@
     }
   }
   renderConfig();
+  window.BetterBattleGameView?.init();
   {
     const requestedTab = new URLSearchParams(window.location.search).get("tab");
     const tabs = new Set([
-      "battle", "squad", "config", "record", "timeline", "damage", "diagnostics",
+      "battle", "gameview", "squad", "config", "record", "timeline", "damage",
+      "diagnostics",
     ]);
     switchTab(tabs.has(requestedTab) ? requestedTab : "battle");
   }
+
+  session?.onCatalog(handleCatalogMessage);
+  session?.onProfiles(handleProfilesMessage);
+  session?.onSnapshot(handleSnapshotMessage);
 
   if (window.chrome?.webview) {
     window.chrome.webview.addEventListener("message", receive);

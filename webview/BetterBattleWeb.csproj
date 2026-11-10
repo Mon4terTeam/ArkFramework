@@ -16,6 +16,11 @@
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3351.48" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Remove="demo\**" />
+    <EmbeddedResource Remove="demo\**" />
+    <None Remove="demo\**" />
+  </ItemGroup>
+  <ItemGroup>
     <None Update="ui\**\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

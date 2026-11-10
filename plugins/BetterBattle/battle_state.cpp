@@ -6,6 +6,16 @@ void LocalBattle::refresh_battle() {
     const std::uint64_t refresh_started = perf_now_us();
     BattleSnapshot next;
     std::vector<TraceUnit> new_trace_units;
+    if (battle_session_closed_.load(std::memory_order_acquire)) {
+        if (scene_.controller) {
+            clear_scene();
+        }
+        next.error = "当前不在战斗场景";
+        publish_web_snapshot(next);
+        publish_snapshot(std::move(next));
+        perf_.refresh.add(perf_now_us() - refresh_started);
+        return;
+    }
     try {
         const std::uint64_t discover_started = perf_now_us();
         void* controller = scene_.controller;
@@ -32,6 +42,24 @@ void LocalBattle::refresh_battle() {
                 publish_snapshot(std::move(next));
                 perf_.refresh.add(perf_now_us() - refresh_started);
                 return;
+            }
+            if (!local_battle_active_.load(std::memory_order_acquire) &&
+                !scene_.stage_pending && scene_.stage.id.empty()) {
+                void* candidate = controllers.front();
+                const int candidate_state = method_int(
+                    runtime_, candidate, classes_.battle_controller,
+                    "get_state", -1);
+                const bool candidate_playing = method_bool(
+                    runtime_, candidate, classes_.battle_controller,
+                    "get_isPlaying");
+                if (candidate_state == 3 && !candidate_playing) {
+                    clear_scene();
+                    next.error = "当前不在战斗场景";
+                    publish_web_snapshot(next);
+                    publish_snapshot(std::move(next));
+                    perf_.refresh.add(perf_now_us() - refresh_started);
+                    return;
+                }
             }
             adopt_scene(controllers.front());
             controller = scene_.controller;
@@ -60,6 +88,17 @@ void LocalBattle::refresh_battle() {
             method_bool(runtime_, controller, classes_.battle_controller, "get_isPlaying");
         next.paused =
             method_bool(runtime_, controller, classes_.battle_controller, "get_isPaused");
+        if (next.state == 3) {
+            next.phase = "ended";
+        } else if (replay_active_.load(std::memory_order_acquire)) {
+            next.phase = "replay";
+        } else if (next.state == 1) {
+            next.phase = "starting";
+        } else if (next.state == 2) {
+            next.phase = next.paused ? "paused" : "playing";
+        } else if (next.playing) {
+            next.phase = "playing";
+        }
         next.stage_id = scene_.stage.level_id;
         next.epoch = static_cast<std::uint32_t>(scene_.revision);
         {

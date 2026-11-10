@@ -3,6 +3,7 @@
 
   const FPS = 30;
   const protocol = window.BetterBattleProtocol;
+  const session = window.BetterBattleSession;
   const NO_SOURCE_ID = "__no_source__";
   const NODE_EVENT_INSET = 9;
   const FULL_RENDER_INTERVAL_MS = 100;
@@ -73,12 +74,14 @@
   const dom = {};
   const ids = [
     "timelinePauseBadge", "timelineStageBadge",
-    "timelineState",
+    "timelineState", "timelinePauseButton", "timelineResumeButton",
     "treeViewToggle", "frameReadout", "totalReadout", "frameInput",
-    "frameGo", "playButton", "splitBranch", "jumpModeNormal", "jumpModeFast",
+    "frameGo", "playButton", "followPlayback", "splitBranch", "rewindPlay",
+    "jumpModeNormal", "jumpModeFast",
     "jumpStart", "jumpEnd",
     "treeScroll", "treeCanvas", "tree", "connectors", "treeNodes",
-    "cursor", "cursorFlag", "treeHint", "renameSegment", "deleteSegment",
+    "cursor", "cursorFlag", "gameCursor", "gameCursorFlag",
+    "treeHint", "renameSegment", "deleteSegment",
     "rewindView",
     "renameModal", "segmentNameInput", "confirmRename", "deleteModal",
     "deleteSegmentName", "deleteSegmentRange", "deleteDescendantCount",
@@ -92,19 +95,27 @@
   for (const id of ids) dom[id] = document.getElementById(id);
 
   const state = {
-    snapshot: null,
-    timeline: null,
-    unitNames: new Map(),
+    get snapshot() {
+      return session?.snapshot || null;
+    },
+    get timeline() {
+      return session?.timeline || null;
+    },
+    get unitNames() {
+      return session?.unitNames || new Map();
+    },
     nodeRender: new Map(),
     frame: 0,
     selectedNodeId: "",
+    branchTargetNodeId: "",
     selectedEventId: "",
     filter: "all",
     viewMode: "detail",
     followLive: true,
     lastFrameAdvanceAt: 0,
     jumpMode: "normal",
-    lastResult: "",
+    resultRevisionSeen: 0,
+    forceResult: false,
     timelineRequested: false,
     rewinding: false,
     rewindEpoch: 0,
@@ -115,6 +126,13 @@
       files: [],
     },
   };
+
+  function setTimelinePauseButtonState(paused) {
+    const known = typeof paused === "boolean";
+    dom.timelinePauseButton?.classList.toggle("primary", known && !paused);
+    dom.timelineResumeButton?.classList.toggle("primary", known && paused);
+  }
+
   let pendingFullRender = 0;
   let lastFullRenderAt = 0;
   let lastRenderSignature = "";
@@ -162,7 +180,10 @@
   }
 
   function isTabActive() {
-    return document.getElementById("page-timeline")?.classList.contains("active");
+    const timelinePage = document.getElementById("page-timeline");
+    if (timelinePage?.classList.contains("active")) return true;
+    return !!document.getElementById("page-gameview")?.classList.contains("active") &&
+      !!document.querySelector("#gameviewTimelineHost .tas-timeline-panel");
   }
 
   function activeTimeline() {
@@ -170,10 +191,11 @@
   }
 
   function clearTimelineState() {
-    state.timeline = null;
+    session?.clearTimeline();
     state.timelineRequested = false;
     state.frame = 0;
     state.selectedNodeId = "";
+    state.branchTargetNodeId = "";
     state.selectedEventId = "";
     state.nodeRender.clear();
     state.followLive = true;
@@ -183,10 +205,7 @@
 
   function isIdleSnapshot(snapshot) {
     if (!snapshot) return true;
-    if (snapshot.available === false) return true;
-    if (snapshot.replay?.active) return false;
-    return snapshot.playing === false &&
-      (Number(snapshot.state) < 1 || Number(snapshot.state) === 3);
+    return window.BetterBattleSession?.idle(snapshot) || false;
   }
 
   function replayInfo() {
@@ -210,7 +229,8 @@
     const live = activeTimeline();
     const advancing = state.lastFrameAdvanceAt > 0 &&
       performance.now() - state.lastFrameAdvanceAt < 900;
-    return !!(state.snapshot?.replay?.active || replayInfo() || live?.jumping ||
+    const phase = window.BetterBattleSession?.phase(state.snapshot);
+    return !!(phase === "replay" || replayInfo() || live?.jumping ||
       live?.advancing || advancing);
   }
 
@@ -256,6 +276,8 @@
         type: healing ? "heal" : (regen ? "regen" : (taken ? "taken" : "damage")),
         actor: String(hit?.actor || ""),
         target: String(hit?.target || ""),
+        actorUid: Number(hit?.actor_uid) || 0,
+        targetUid: Number(hit?.target_uid) || 0,
         damageType: type.key,
         damageLabel: type.label,
         amount: Math.abs(Number(hit?.value) || 0),
@@ -266,15 +288,17 @@
   function worldEvents() {
     const events = Array.isArray(activeTimeline()?.world_events)
       ? activeTimeline().world_events : [];
-    return events.map((event, index) => ({
-      id: `world:${Number(event?.frame) || 0}:${index}`,
-      nodeId: String(event?.node_id || ""),
-      frame: Number(event?.frame) || 0,
-      category: "world",
-      type: Number(event?.kind) === 2 ? "wave" : "cost",
-      value: Number(event?.value) || 0,
-      total: Number(event?.total) || 0,
-    }));
+    return events
+      .filter((event) => Number(event?.kind) !== 2)
+      .map((event, index) => ({
+        id: `world:${Number(event?.frame) || 0}:${index}`,
+        nodeId: String(event?.node_id || ""),
+        frame: Number(event?.frame) || 0,
+        category: "world",
+        type: "cost",
+        value: Number(event?.value) || 0,
+        total: Number(event?.total) || 0,
+      }));
   }
 
   function timelineNodes() {
@@ -330,6 +354,93 @@
       node = byId.get(node.parentId);
     }
     return path.reverse();
+  }
+
+  function nodePath(nodes, nodeId) {
+    const byId = new Map(nodes.map((node) => [node.id, node]));
+    const path = [];
+    const seen = new Set();
+    let node = byId.get(String(nodeId || ""));
+    while (node && !seen.has(node.id)) {
+      path.push(node);
+      seen.add(node.id);
+      node = byId.get(node.parentId);
+    }
+    return path.reverse();
+  }
+
+  function descendantConnectorIds(nodes, targetId) {
+    const baseId =
+      playbackNodeAtFrame(nodes, currentPlaybackFrame())?.id || "";
+    const base = nodePath(nodes, baseId).map((node) => node.id);
+    const target = nodePath(nodes, targetId).map((node) => node.id);
+    if (!base.length || !target.length || base.length > target.length) {
+      return new Set();
+    }
+    for (let index = 0; index < base.length; index += 1) {
+      if (base[index] !== target[index]) return new Set();
+    }
+    return new Set(target.slice(base.length));
+  }
+
+  function isPlaybackPathDescendant(nodes, targetId) {
+    const baseId =
+      playbackNodeAtFrame(nodes, currentPlaybackFrame())?.id || "";
+    const base = nodePath(nodes, baseId).map((node) => node.id);
+    const target = nodePath(nodes, targetId).map((node) => node.id);
+    if (!base.length || !target.length || base.length > target.length) {
+      return false;
+    }
+    return base.every((id, index) => id === target[index]);
+  }
+
+  function isNodeOnTimelinePath(nodes, targetId) {
+    const active = timelinePathNodes(nodes).map((node) => node.id);
+    const target = nodePath(nodes, targetId).map((node) => node.id);
+    return target.length > 0 && target.length <= active.length &&
+      target.every((id, index) => id === active[index]);
+  }
+
+  function selectedBranchTarget(nodes) {
+    const target = String(state.branchTargetNodeId || "");
+    return target &&
+      (isPlaybackPathDescendant(nodes, target) ||
+       isNodeOnTimelinePath(nodes, target))
+      ? target
+      : "";
+  }
+
+  function actionNodeId(nodes, frame) {
+    const target = Number(frame) || 0;
+    const selected = nodes.find(
+      (node) => node.id === String(state.selectedNodeId || ""),
+    );
+    return selectedBranchTarget(nodes) ||
+      (isNodeOnTimelinePath(nodes, state.selectedNodeId)
+        ? state.selectedNodeId
+        : "") ||
+      (selected && target >= selected.start && target <= selected.end
+        ? selected.id
+        : "") ||
+      playbackNodeAtFrame(nodes, currentPlaybackFrame())?.id ||
+      playbackNodeAtFrame(nodes, target)?.id ||
+      timelineCurrentNodeId(nodes);
+  }
+
+  function switchPlaybackPath(nodes, targetId) {
+    const target = String(targetId || "");
+    if (!target || !isPlaybackPathDescendant(nodes, target)) {
+      return;
+    }
+    const active = timelinePathNodes(nodes).map((node) => node.id);
+    const targetPath = nodePath(nodes, target).map((node) => node.id);
+    const alreadyOnPath = targetPath.every(
+      (id, index) => active[index] === id,
+    );
+    if (alreadyOnPath || !replayInfo()) {
+      return;
+    }
+    sendCommand(protocol.commands.timelineBranch(target));
   }
 
   function playbackNodeAtFrame(nodes, frame) {
@@ -418,9 +529,34 @@
     return TYPE_META[event.type]?.color || CATEGORY[event.category]?.color || "#74808a";
   }
 
-  function unitName(unitId) {
+  function unitName(unitId, unitUid = 0) {
     const id = String(unitId || "");
     if (id === NO_SOURCE_ID) return "无来源";
+    if (id.startsWith("enemy_") && window.BetterBattleEnemyDisplay) {
+      const snapshot = state.snapshot;
+      const profiles = session
+        ? session.enemyProfiles(snapshot)
+        : new Map(
+          (Array.isArray(snapshot?.enemy_profiles)
+            ? snapshot.enemy_profiles
+            : []).map((profile) => [String(profile?.id || ""), profile]),
+        );
+      const enemies = Array.isArray(snapshot?.enemies) ? snapshot.enemies : [];
+      const exact = window.BetterBattleEnemyDisplay.labelByUid(
+        unitUid,
+        Array.isArray(snapshot?.enemy_identities)
+          ? snapshot.enemy_identities
+          : [],
+        profiles,
+        enemies,
+      );
+      if (exact) return exact;
+      return window.BetterBattleEnemyDisplay.label(
+        id,
+        profiles,
+        enemies,
+      );
+    }
     return UNIT_NAME_BY_ID.get(id)
       || state.unitNames.get(id)
       || id;
@@ -432,19 +568,19 @@
     }
     if (event.type === "damage") {
       return event.actor
-        ? `${unitName(event.actor)} 对 ${unitName(event.target)} 造成 ${formatNumber(event.amount)} 点${event.damageLabel}伤害`
-        : `${unitName(event.target)} 受到 ${formatNumber(event.amount)} 点${event.damageLabel}伤害`;
+        ? `${unitName(event.actor, event.actorUid)} 对 ${unitName(event.target, event.targetUid)} 造成 ${formatNumber(event.amount)} 点${event.damageLabel}伤害`
+        : `${unitName(event.target, event.targetUid)} 受到 ${formatNumber(event.amount)} 点${event.damageLabel}伤害`;
     }
     if (event.type === "heal") {
       return event.actor && event.actor !== event.target
-        ? `${unitName(event.actor)} 为 ${unitName(event.target)} 回复 ${formatNumber(event.amount)} 点生命`
-        : `${unitName(event.target)} 回复 ${formatNumber(event.amount)} 点生命`;
+        ? `${unitName(event.actor, event.actorUid)} 为 ${unitName(event.target, event.targetUid)} 回复 ${formatNumber(event.amount)} 点生命`
+        : `${unitName(event.target, event.targetUid)} 回复 ${formatNumber(event.amount)} 点生命`;
     }
     if (event.type === "taken") {
-      return `${unitName(event.target)} 受到 ${formatNumber(event.amount)} 点伤害`;
+      return `${unitName(event.target, event.targetUid)} 受到 ${formatNumber(event.amount)} 点伤害`;
     }
     if (event.type === "regen") {
-      return `${unitName(event.target)} 被动回复 ${formatNumber(event.amount)} 点生命`;
+      return `${unitName(event.target, event.targetUid)} 被动回复 ${formatNumber(event.amount)} 点生命`;
     }
     if (event.type === "cost") {
       return `费用 +${formatNumber(event.value)} · 当前 ${formatNumber(event.total)}`;
@@ -640,6 +776,7 @@
     setHtml(dom.treeNodes, html + splitDots);
     renderConnectors(nodes);
     renderCursor(nodes, live);
+    renderGameCursor(nodes, live);
   }
 
   function renderConnectors(nodes) {
@@ -651,6 +788,10 @@
     }
     dom.connectors.setAttribute("viewBox", `0 0 ${width} ${height}`);
     const paths = [];
+    const selectedLinks = descendantConnectorIds(
+      nodes,
+      selectedBranchTarget(nodes),
+    );
     for (const child of nodes) {
       if (!child.parentId) continue;
       const parent = nodes.find((node) => node.id === child.parentId);
@@ -660,15 +801,19 @@
       const x2 = child.render.x - 1;
       const y2 = child.render.centerY;
       const color = branchColor(child.branchId);
-      if (Math.abs(y1 - y2) < 1) {
-        paths.push(`<path d="M ${x1} ${y1} L ${x2} ${y2}" fill="none"
-          stroke="${color}" stroke-opacity=".44" stroke-width="1"></path>`);
-      } else {
-        const midX = (x1 + x2) / 2;
-        paths.push(`<path d="M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}"
-          fill="none" stroke="${color}" stroke-opacity=".6" stroke-width="1.2"></path>
-          <circle cx="${x1}" cy="${y1}" r="1.8" fill="${color}" fill-opacity=".9"></circle>`);
-      }
+      const selected = selectedLinks.has(child.id);
+      const d = Math.abs(y1 - y2) < 1
+        ? `M ${x1} ${y1} L ${x2} ${y2}`
+        : `M ${x1} ${y1} C ${(x1 + x2) / 2} ${y1}, ${(x1 + x2) / 2} ${y2}, ${x2} ${y2}`;
+      const marker = Math.abs(y1 - y2) < 1
+        ? ""
+        : `<circle cx="${x1}" cy="${y1}" r="1.8" fill="${color}" fill-opacity=".9"></circle>`;
+      paths.push(`<g class="tas-connector${selected ? " is-selected" : ""}"
+        data-child-id="${esc(child.id)}" style="--branch-color:${color}">
+        <path class="tas-connector-hit" d="${d}"></path>
+        <path class="tas-connector-line${Math.abs(y1 - y2) < 1 ? " is-straight" : ""}"
+          d="${d}"></path>${marker}
+      </g>`);
     }
     setHtml(dom.connectors, paths.join(""));
   }
@@ -687,6 +832,31 @@
     dom.cursor.style.top = `${node.render.y - 4}px`;
     dom.cursor.style.height = `${node.render.height + 8}px`;
     dom.cursorFlag.textContent = `F${state.frame}`;
+  }
+
+  function renderGameCursor(nodes, live) {
+    const frame = currentPlaybackFrame();
+    const node = playbackNodeAtFrame(nodes, frame);
+    if (!node?.render || !live) {
+      dom.gameCursor.hidden = true;
+      return;
+    }
+    dom.gameCursor.hidden = false;
+    dom.gameCursor.style.left = `${nodeFrameX(node, frame)}px`;
+    dom.gameCursor.style.top = `${node.render.y - 4}px`;
+    dom.gameCursor.style.height = `${node.render.height + 8}px`;
+    dom.gameCursorFlag.textContent = `实际 F${frame}`;
+  }
+
+  function renderCursorsNow() {
+    const nodes = timelineNodes();
+    const live = activeTimeline();
+    if (!live) return;
+    for (const node of nodes) {
+      node.render = state.nodeRender.get(node.id) || null;
+    }
+    renderCursor(nodes, live);
+    renderGameCursor(nodes, live);
   }
 
   function filteredEvents(nodes, node) {
@@ -769,9 +939,9 @@
       }
     } else if (event.category === "combat") {
       if (event.actor) {
-        lines.push(["来源单位", unitName(event.actor)]);
+        lines.push(["来源单位", unitName(event.actor, event.actorUid)]);
       }
-      lines.push(["目标单位", unitName(event.target)]);
+      lines.push(["目标单位", unitName(event.target, event.targetUid)]);
       lines.push(["类型", event.damageLabel]);
       if (event.type === "heal") {
         lines.push(["治疗量", formatNumber(event.amount)]);
@@ -846,12 +1016,17 @@
         ? "未战斗"
         : (advancing
           ? `快进至 F${Number(live?.advance_target) || 0}`
-          : (snapshot?.paused
-            ? "已暂停"
-            : (snapshot?.replay?.active
-              ? "回放中"
-              : (Number(snapshot?.state) === 3 ? "已结束" : "战斗中")))));
-    dom.timelinePauseBadge.classList.toggle("amber", !idle && !snapshot?.paused);
+          : (window.BetterBattleSession?.phaseLabel(snapshot) || "战斗中")));
+    const headerPhase = window.BetterBattleSession?.phase(snapshot);
+    dom.timelinePauseBadge.classList.toggle(
+      "amber",
+      headerPhase === "paused" || headerPhase === "ended" ||
+        headerPhase === "starting",
+    );
+    const paused = idle ? null : (typeof snapshot?.paused === "boolean"
+      ? snapshot.paused
+      : null);
+    setTimelinePauseButtonState(paused);
     const stageId = idle && !live
       ? ""
       : String(live?.stage || snapshot?.stage_input || snapshot?.stage || "").trim();
@@ -883,6 +1058,10 @@
       "aria-pressed", state.jumpMode === "normal" ? "true" : "false");
     dom.jumpModeFast.setAttribute(
       "aria-pressed", state.jumpMode === "fast" ? "true" : "false");
+    dom.followPlayback.disabled = !live || state.followLive;
+    dom.followPlayback.title = state.followLive
+      ? "已经在跟随当前录像位置"
+      : "回到当前录像播放位置并持续跟随";
     dom.frameReadout.textContent = formatFrame(state.frame);
     dom.totalReadout.textContent = formatFrame(totalFrames(nodes));
     dom.deleteSegment.disabled = !live || !selection || !selection.parentId;
@@ -893,7 +1072,7 @@
     const targetBefore = targetFrame < snapshotFrame;
     dom.splitBranch.textContent = replayMode
       ? (targetBefore ? "回退到指针" : "快进到指针")
-      : "回退并分叉";
+      : "回退到指针";
     dom.splitBranch.disabled = !live || !!live?.jumping || rewinding;
     dom.splitBranch.title = dom.splitBranch.disabled
       ? (replayMode
@@ -903,7 +1082,12 @@
           ? (targetBefore
               ? `重新开局并回退到 F${targetFrame}`
               : `继续播放当前录像到 F${targetFrame}`)
-          : `重放至 F${targetFrame}，暂停后继续录制`);
+          : `重新开局并回退到 F${targetFrame}，不执行原录像操作`);
+    dom.rewindPlay.disabled = !live || !!live?.jumping || rewinding ||
+      snapshotFrame <= 0 || !targetBefore;
+    dom.rewindPlay.title = dom.rewindPlay.disabled
+      ? "需要活动时间轴，且目标帧早于当前帧"
+      : `重新开局并回退到 F${targetFrame}，随后继续播放原录像`;
     dom.frameGo.textContent = replayMode
       ? (targetBefore ? "回退" : "快进")
       : "定位";
@@ -930,7 +1114,8 @@
     const live = activeTimeline();
     const laneNodeId = laneNodeIdFor(nodes);
     const signature = [
-      state.selectedNodeId, state.selectedEventId, state.filter, state.viewMode,
+      state.selectedNodeId, state.branchTargetNodeId,
+      state.selectedEventId, state.filter, state.viewMode,
       state.timeline?.revision, state.timeline?.current_id,
       state.timeline?.jumping, state.snapshot?.paused,
       state.rewinding,
@@ -1018,7 +1203,7 @@
     }, delay);
   }
 
-  function requestJump(frame, nodeId = "") {
+  function requestJump(frame, nodeId = "", autoPlay = false) {
     const live = activeTimeline();
     const snapshotFrame = Number(state.snapshot?.frame) || 0;
     if (!live) {
@@ -1033,12 +1218,23 @@
       toast("还没有可回退的逻辑帧", "error");
       return;
     }
+    const nodes = timelineNodes();
+    if (nodeId && !nodes.some((node) => node.id === nodeId)) {
+      nodeId = "";
+    }
     const target = clamp(Math.round(Number(frame) || 0), 0, snapshotFrame);
+    if (!nodeId) {
+      nodeId = actionNodeId(nodes, target);
+    }
     const fast = state.jumpMode === "fast";
     state.followLive = true;
-    state.selectedNodeId = live.current_id || state.selectedNodeId;
-    sendCommand(protocol.commands.timelineJump(target, nodeId, fast));
-    toast(`已请求${fast ? "快速(beta) " : ""}回退到 F${target}`);
+    if (target < snapshotFrame) {
+      state.rewinding = true;
+      state.rewindEpoch = Number(state.snapshot?.epoch) || 0;
+      state.rewindStartedAt = performance.now();
+    }
+    sendCommand(protocol.commands.timelineJump(target, nodeId, fast, autoPlay));
+    toast(`已请求${fast ? "快速(beta) " : ""}${autoPlay ? "回退并播放" : "回退到指针"} F${target}`);
   }
 
   function requestReplaySeek(frame, nodeId = "") {
@@ -1055,24 +1251,24 @@
       toast("指针已经在当前帧");
       return;
     }
+    if (nodeId && !nodes.some((node) => node.id === nodeId)) {
+      nodeId = "";
+    }
+    if (!nodeId) {
+      nodeId = actionNodeId(nodes, target);
+    }
+    if (target < current) {
+      requestJump(target, nodeId, false);
+      return;
+    }
+    const switchesBranch = !!nodeId &&
+      !isPlaybackPathDescendant(nodes, nodeId) &&
+      !isNodeOnTimelinePath(nodes, nodeId);
     const fast = state.jumpMode === "fast";
-    const backward = target < current;
-    if (backward) {
-      state.rewinding = true;
-      state.rewindEpoch = Number(state.snapshot?.epoch) || 0;
-      state.rewindStartedAt = performance.now();
-    }
     state.followLive = true;
-    if (backward && nodeId) {
-      state.selectedNodeId = nodeId;
-    } else if (!nodeId) {
-      const containing = nodes.find(
-        (node) => target >= node.start && target <= node.end);
-      if (containing) state.selectedNodeId = containing.id;
-    }
     sendCommand(protocol.commands.replaySeek(target, nodeId, fast));
-    const action = backward
-      ? "回退（重新开局）"
+    const action = switchesBranch
+      ? "切换到指针（重新开局）"
       : (nodeId ? "快进（按选中节点）" : "快进");
     toast(`已请求${action}${fast ? "（快速）" : ""}到 F${target}`);
   }
@@ -1138,7 +1334,7 @@
       return;
     }
     const path = joinPath(directory, name);
-    state.lastResult = "";
+    state.forceResult = true;
     sendCommand(protocol.commands.replaySave(path, dom.saveEvents.checked));
     dom.saveTimelineModal.hidden = true;
     toast(`正在保存到 ${path}`);
@@ -1210,6 +1406,7 @@
     }
     state.followLive = true;
     state.selectedNodeId = "";
+    state.branchTargetNodeId = "";
     state.selectedEventId = "";
     state.frame = 0;
     sendCommand(protocol.commands.replayStart(path));
@@ -1318,6 +1515,12 @@
     if (!node) return;
     state.followLive = false;
     state.selectedNodeId = node.id;
+    state.branchTargetNodeId =
+      (isPlaybackPathDescendant(nodes, node.id) ||
+       isNodeOnTimelinePath(nodes, node.id))
+        ? node.id
+        : "";
+    switchPlaybackPath(nodes, state.branchTargetNodeId);
     state.viewMode = "detail";
     state.frame = clamp(
       Math.round(Number(frame) || state.frame),
@@ -1337,10 +1540,13 @@
     const nodes = timelineNodes();
     state.followLive = false;
     state.selectedEventId = eventData.id;
+    state.branchTargetNodeId = "";
     state.frame = eventData.frame;
     const owner = nodes.find((node) => node.id === eventData.nodeId)
       || nodes.find((node) => nodeHasEvent(node, eventData));
-    if (owner) state.selectedNodeId = owner.id;
+    if (owner) {
+      state.selectedNodeId = owner.id;
+    }
     render(true);
   }
 
@@ -1376,6 +1582,95 @@
     }, 0);
   }
 
+  function handleSnapshotMessage(payload, previous) {
+    const previousFrame = Number(previous?.frame);
+    const nextFrame = Number(payload?.frame);
+    if (Number.isFinite(nextFrame) &&
+        (!Number.isFinite(previousFrame) || nextFrame > previousFrame)) {
+      state.lastFrameAdvanceAt = performance.now();
+    }
+    setTimelinePauseButtonState(
+      isIdleSnapshot(payload)
+        ? null
+        : (typeof payload.paused === "boolean" ? payload.paused : null),
+    );
+    if (state.rewinding) {
+      const epoch = Number(payload.epoch) || 0;
+      const battleState = Number(payload.state);
+      const timedOut = state.rewindStartedAt > 0 &&
+        performance.now() - state.rewindStartedAt > 120000;
+      if (timedOut ||
+          (epoch !== state.rewindEpoch && battleState >= 2)) {
+        state.rewinding = false;
+      }
+    }
+    const result = String(payload.result || "");
+    const resultRevision = session?.resultRevision || 0;
+    if (result &&
+        (resultRevision !== state.resultRevisionSeen || state.forceResult)) {
+      state.resultRevisionSeen = resultRevision;
+      state.forceResult = false;
+      if (isTabActive() && result.startsWith("录像已保存")) {
+        toast("保存成功", "ok");
+      } else if (isTabActive() && result.startsWith("保存录像失败")) {
+        toast(result, "error");
+      } else if (isTabActive() && result.startsWith("Warning")) {
+        toast(result, "error");
+      }
+    }
+    if (isIdleSnapshot(payload)) {
+      clearTimelineState();
+      if (isTabActive()) render(true);
+      return;
+    }
+    if (state.followLive) {
+      state.frame = Number(payload.frame) || 0;
+    }
+    if (isTabActive()) renderCursorsNow();
+    if (!state.timelineRequested && !!payload.record?.timeline?.active) {
+      state.timelineRequested = true;
+      sendCommand(protocol.commands.timelineStatus());
+    }
+    if (isTabActive()) scheduleFullRender();
+  }
+
+  function handleTimelineMessage(payload, previous) {
+    if (state.snapshot && isIdleSnapshot(state.snapshot)) {
+      clearTimelineState();
+      if (isTabActive()) render(true);
+      return;
+    }
+    const previousNodeIds = new Set(
+      (Array.isArray(previous?.nodes) ? previous.nodes : [])
+        .map((node) => String(node?.id || "")),
+    );
+    state.timelineRequested = true;
+    if (payload?.active === false) {
+      clearTimelineState();
+      if (isTabActive()) render(true);
+      return;
+    }
+    const currentId = String(payload?.current_id || "");
+    const newNode = currentId && !previousNodeIds.has(currentId);
+    if (newNode) {
+      state.selectedNodeId = currentId;
+      state.followLive = true;
+      state.frame = Number(state.snapshot?.frame) || state.frame;
+    } else if (state.followLive && payload?.current_id) {
+      state.selectedNodeId = payload.current_id;
+    } else if (!state.selectedNodeId && payload?.current_id) {
+      state.selectedNodeId = payload.current_id;
+    }
+    if (isTabActive()) {
+      scheduleFullRender();
+      if (newNode) {
+        requestAnimationFrame(() => {
+          if (isTabActive()) centerNode(currentId, state.frame);
+        });
+      }
+    }
+  }
+
   function receive(event) {
     let message = event.data;
     if (typeof message === "string") {
@@ -1392,98 +1687,6 @@
     }
     if (message.type === protocol.Message.PathPicked) {
       handlePickedPath(message);
-      return;
-    }
-    if (message.topic === protocol.Topic.Snapshot && message.payload) {
-      const payload = window.BetterBattleSession?.snapshot || message.payload;
-      const previousFrame = Number(state.snapshot?.frame);
-      const nextFrame = Number(payload?.frame);
-      if (Number.isFinite(nextFrame) &&
-          (!Number.isFinite(previousFrame) || nextFrame > previousFrame)) {
-        state.lastFrameAdvanceAt = performance.now();
-      }
-      state.snapshot = payload;
-      if (state.rewinding) {
-        const epoch = Number(payload.epoch) || 0;
-        const battleState = Number(payload.state);
-        const timedOut = state.rewindStartedAt > 0 &&
-          performance.now() - state.rewindStartedAt > 120000;
-        if (timedOut ||
-            (epoch !== state.rewindEpoch && battleState >= 2)) {
-          state.rewinding = false;
-        }
-      }
-      const result = String(payload.result || "");
-      if (result && result !== state.lastResult) {
-        state.lastResult = result;
-        if (isTabActive() && result.startsWith("录像已保存")) {
-          toast("保存成功", "ok");
-        } else if (isTabActive() && result.startsWith("保存录像失败")) {
-          toast(result, "error");
-        } else if (isTabActive() && result.startsWith("Warning")) {
-          toast(result, "error");
-        }
-      }
-      if (isIdleSnapshot(payload)) {
-        clearTimelineState();
-        if (isTabActive()) render(true);
-        return;
-      }
-      if (Array.isArray(payload.units)) {
-        const names = new Map();
-        for (const unit of payload.units) {
-          const id = String(unit?.id || "");
-          if (!id) continue;
-          names.set(id, String(unit.name || unit.tmpl || id));
-        }
-        state.unitNames = names;
-      }
-      if (state.followLive) {
-        state.frame = Number(payload.frame) || 0;
-      }
-      if (!state.timelineRequested && !!payload.record?.timeline?.active) {
-        state.timelineRequested = true;
-        sendCommand(protocol.commands.timelineStatus());
-      }
-      if (isTabActive()) scheduleFullRender();
-      return;
-    }
-    if (message.topic === protocol.Topic.Timeline && message.payload) {
-      if (state.snapshot && isIdleSnapshot(state.snapshot)) {
-        clearTimelineState();
-        if (isTabActive()) render(true);
-        return;
-      }
-      const previousNodeIds = new Set(
-        (Array.isArray(state.timeline?.nodes) ? state.timeline.nodes : [])
-          .map((node) => String(node?.id || "")),
-      );
-      state.timeline = window.BetterBattleSession?.timeline || message.payload;
-      state.timelineRequested = true;
-      if (state.timeline?.active === false) {
-        clearTimelineState();
-        if (isTabActive()) render(true);
-        return;
-      }
-      const currentId = String(state.timeline?.current_id || "");
-      const newNode = currentId && !previousNodeIds.has(currentId);
-      if (newNode) {
-        state.selectedNodeId = currentId;
-        state.followLive = true;
-        state.frame = Number(state.snapshot?.frame) || state.frame;
-      } else if (state.followLive && state.timeline?.current_id) {
-        state.selectedNodeId = state.timeline.current_id;
-      } else if (!state.selectedNodeId && state.timeline?.current_id) {
-        state.selectedNodeId = state.timeline.current_id;
-      }
-      if (isTabActive()) {
-        scheduleFullRender();
-        if (newNode) {
-          requestAnimationFrame(() => {
-            if (isTabActive()) centerNode(currentId, state.frame);
-          });
-        }
-      }
       return;
     }
     if (message.type === protocol.Message.Command &&
@@ -1522,6 +1725,17 @@
     dom.playButton.addEventListener("click", () => {
       sendCommand(protocol.commands.timelineStatus());
     });
+    dom.followPlayback.addEventListener("click", () => {
+      const nodes = timelineNodes();
+      const frame = currentPlaybackFrame();
+      const node = playbackNodeAtFrame(nodes, frame);
+      state.followLive = true;
+      state.frame = frame;
+      state.selectedNodeId = node?.id || timelineCurrentNodeId(nodes);
+      state.branchTargetNodeId = "";
+      render(true);
+      if (node) requestAnimationFrame(() => centerNode(node.id, frame));
+    });
     document.querySelectorAll("[data-ff]").forEach((button) => {
       button.addEventListener("click", () => {
         const frames = Math.max(1, Number(button.dataset.ff) || 0);
@@ -1550,17 +1764,26 @@
     });
     dom.splitBranch.addEventListener("click", () => {
       const target = actionTargetFrame();
-      const nodeId = selectedNode(timelineNodes())?.id;
-      if (replayInfo()) {
+      const nodeId = actionNodeId(timelineNodes(), target);
+      if (replayInfo() && target >= currentPlaybackFrame()) {
         requestReplaySeek(target, nodeId);
         return;
       }
       requestJump(target, nodeId);
     });
+    dom.rewindPlay.addEventListener("click", () => {
+      const target = actionTargetFrame();
+      const nodeId = actionNodeId(timelineNodes(), target);
+      if (target >= currentPlaybackFrame()) {
+        toast("回退并播放需要选择当前帧之前的帧", "error");
+        return;
+      }
+      requestJump(target, nodeId, true);
+    });
     dom.frameGo.addEventListener("click", () => {
       const target = actionTargetFrame();
       if (replayInfo() && target !== currentPlaybackFrame()) {
-        requestReplaySeek(target, selectedNode(timelineNodes())?.id);
+        requestReplaySeek(target, actionNodeId(timelineNodes(), target));
         return;
       }
       seekPointer(target, selectedNode(timelineNodes())?.id);
@@ -1602,6 +1825,19 @@
     dom.tree.addEventListener("pointerdown", (event) => {
       if (event.button !== 0) return;
       const marker = event.target.closest(".tas-node-event");
+      const branchLink = event.target.closest("[data-child-id]");
+      if (branchLink) {
+        const nodes = timelineNodes();
+        const child = nodes.find(
+          (node) => node.id === branchLink.dataset.childId,
+        );
+        if (child && isPlaybackPathDescendant(nodes, child.id)) {
+          state.branchTargetNodeId = child.id;
+          switchPlaybackPath(nodes, child.id);
+          render(true);
+        }
+        return;
+      }
       if (marker) {
         selectEvent(eventById(timelineNodes(), marker.dataset.eventId));
         return;
@@ -1652,8 +1888,8 @@
       event.preventDefault();
       const eventData = eventById(timelineNodes(), state.selectedEventId);
       if (!eventData) return;
-      const nodeId =
-        eventData.nodeId || selectedNode(timelineNodes())?.id || "";
+      const nodeId = eventData.nodeId ||
+        actionNodeId(timelineNodes(), eventData.frame);
       if (replayInfo()) {
         requestReplaySeek(eventData.frame, nodeId);
       } else {
@@ -1714,6 +1950,8 @@
     window.addEventListener("resize", () => {
       if (isTabActive()) scheduleFullRender(true);
     });
+    session?.onSnapshot(handleSnapshotMessage);
+    session?.onTimeline(handleTimelineMessage);
     if (window.chrome?.webview) {
       window.chrome.webview.addEventListener("message", receive);
     }

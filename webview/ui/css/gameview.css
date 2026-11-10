@@ -1,0 +1,331 @@
+#page-gameview.active {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gameview-toolbar {
+  display: flex;
+  min-height: 34px;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 2px;
+}
+
+.gameview-toolbar-state {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.gameview-toolbar-hint {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gameview-toolbar .button-row {
+  flex: none;
+  margin: 0;
+}
+
+.gameview-layout {
+  --gameview-left: 216px;
+  --gameview-right: 384px;
+  display: grid;
+  width: 100%;
+  flex: 1;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  grid-template-columns: var(--gameview-left) minmax(0, 1fr) var(--gameview-right);
+  grid-template-rows: var(--gameview-game-height, 600px) minmax(0, 1fr);
+  gap: 6px;
+}
+
+.gameview-rail,
+.gameview-detail,
+.gameview-timeline {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.gameview-rail-head {
+  flex: none;
+  gap: 8px;
+  padding: 0 8px 0 4px;
+}
+
+.gameview-list-tabs {
+  flex: 1;
+  min-width: 0;
+}
+
+.gameview-list-tabs button {
+  min-width: 0;
+  padding: 0 8px;
+}
+
+.gameview-rail {
+  display: flex;
+  grid-column: 1;
+  grid-row: 1;
+  flex-direction: column;
+}
+
+.gameview-rail-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.gameview-rail .unit-tab {
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 8px;
+  padding: 6px 7px;
+}
+
+.gameview-rail .unit-avatar {
+  width: 40px;
+  height: 40px;
+}
+
+.gameview-rail .unit-tab-name {
+  display: block;
+}
+
+.gameview-rail .unit-tab-name strong {
+  display: block;
+  font-size: 12.5px;
+}
+
+.gameview-rail .enemy-row {
+  min-height: 0;
+  padding: 6px 7px;
+}
+
+.gameview-rail .enemy-row-coord,
+.gameview-rail .enemy-hp {
+  display: none;
+}
+
+.gameview-rail .enemy-row-avatar {
+  width: 40px;
+  height: 40px;
+}
+
+.gameview-stage {
+  display: flex;
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
+  align-items: flex-start;
+  justify-content: flex-start;
+  overflow: hidden;
+}
+
+.gameview-game-hole {
+  position: relative;
+  display: grid;
+  width: 1067px;
+  height: 600px;
+  flex: none;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 34%),
+    #020405;
+}
+
+.gameview-game-hole::before {
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(143, 240, 192, 0.12);
+  content: "";
+  pointer-events: none;
+}
+
+.gameview-game-placeholder {
+  display: grid;
+  max-width: 360px;
+  gap: 9px;
+  justify-items: center;
+  color: var(--muted);
+  text-align: center;
+}
+
+.gameview-game-placeholder strong {
+  color: var(--text-2);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.gameview-game-placeholder small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.gameview-game-hole.is-attached .gameview-game-placeholder {
+  display: none;
+}
+
+.gameview-timeline-host {
+  display: flex;
+  grid-column: 1 / 3;
+  grid-row: 2;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.gameview-timeline-host > .tas-timeline-panel {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding-bottom: 0;
+}
+
+.gameview-timeline-host .tas-timeline-head {
+  display: none;
+}
+
+.gameview-timeline-host .tas-transport {
+  min-width: 0;
+  flex: none;
+  gap: 3px;
+  padding: 5px 0 6px;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+}
+
+.gameview-timeline-host .tas-transport .btn.tiny {
+  height: 23px;
+  padding: 0 5px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.gameview-timeline-host .tas-frame-readout strong {
+  font-size: 18px;
+}
+
+.gameview-timeline-host .tas-tree-wrap,
+.gameview-timeline-host .tas-tree-scroll,
+.gameview-timeline-host .tas-tree {
+  min-height: 0;
+}
+
+.gameview-timeline-host .tas-tree {
+  height: 100%;
+}
+
+.gameview-detail {
+  display: flex;
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  flex-direction: column;
+}
+
+.gameview-detail .panel-head {
+  flex: none;
+}
+
+.gameview-detail-title {
+  min-width: 0;
+}
+
+.gameview-detail-title h3 {
+  overflow: hidden;
+  margin: 2px 0 0;
+  font-size: 18px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gameview-detail-meta {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gameview-detail-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 14px 14px;
+}
+
+.gameview-detail-section {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.gameview-detail-section:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.gameview-detail .section-label {
+  margin-bottom: 7px;
+}
+
+.gameview-detail .stats-grid,
+.gameview-detail .enemy-stat-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.gameview-detail .stat-cell {
+  padding: 8px 10px 9px;
+}
+
+.gameview-detail .stat-cell strong {
+  font-size: 15px;
+}
+
+.gameview-detail .buff-list {
+  margin: 0 -14px;
+}
+
+.gameview-detail .buff {
+  padding: 10px 14px 11px;
+}
+
+.gameview-detail .empty-small {
+  padding: 8px 0;
+}
+
+.gameview-detail .stats-abnormal {
+  margin-top: 9px;
+  padding-top: 8px;
+}
+
+.gameview-detail .enemy-buff-list {
+  display: grid;
+}
+
+@media (max-width: 1180px) {
+  .gameview-layout {
+    --gameview-left: 190px;
+    --gameview-right: 330px;
+  }
+}

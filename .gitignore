@@ -15,6 +15,8 @@ __pycache__/
 /webview/bin/
 /webview/obj/
 /webview/art_cache/
+/webview/demo/bin/
+/webview/demo/obj/
 
 # Local test automation and development-only scripts
 /run-test.ps1

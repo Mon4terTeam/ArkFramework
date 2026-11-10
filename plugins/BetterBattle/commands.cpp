@@ -702,18 +702,43 @@ void LocalBattle::cmd_timeline(Args& args) {
     const std::string action = args.next();
     std::string name;
     std::string label;
+    bool auto_play = false;
     int value = 0;
     if (action == "jump") {
         value = args.integer();
-        const std::string argument = args.next();
-        if (argument == "fast") {
-            label = "fast";
+        std::string argument = args.next();
+        if (argument == "fast" || argument == "normal" ||
+            argument == "play") {
+            if (argument == "fast") {
+                label = "fast";
+            } else if (argument == "play") {
+                auto_play = true;
+            }
         } else if (!argument.empty()) {
             name = argument;
-            label = args.next();
+            argument = args.next();
+        }
+        if (argument == "fast") {
+            label = "fast";
+        } else if (argument == "normal") {
+            label.clear();
+        } else if (argument == "play") {
+            auto_play = true;
+        } else if (!argument.empty()) {
+            throw std::runtime_error("未知 timeline jump 参数: " + argument);
+        }
+        for (std::string extra = args.next(); !extra.empty();
+             extra = args.next()) {
+            if (extra == "play") {
+                auto_play = true;
+            } else {
+                throw std::runtime_error("未知 timeline jump 参数: " + extra);
+            }
         }
     } else if (action == "advance") {
         value = args.integer();
+    } else if (action == "branch") {
+        name = args.next();
     } else if (action == "rename") {
         name = args.next();
         label = args.rest();
@@ -721,10 +746,11 @@ void LocalBattle::cmd_timeline(Args& args) {
         name = args.next();
     } else if (action != "status") {
         throw std::runtime_error(
-            "timeline 需要 jump <frame> [node] [fast]、advance <frames>、status、"
+            "timeline 需要 jump <frame> [node] [fast]、advance <frames>、"
+            "branch <node>、status、"
             "rename <node> <name> 或 delete <node>");
     }
-    timeline_action(action, name, label, value);
+    timeline_action(action, name, label, value, auto_play);
 }
 
 void LocalBattle::cmd_replay(Args& args) {

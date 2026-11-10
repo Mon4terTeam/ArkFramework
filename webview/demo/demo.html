@@ -1,0 +1,1111 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BetterBattle · Owned Dashboard Demo</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #07090c;
+      --panel: #0c1116;
+      --panel-2: #10161c;
+      --line: #1c262d;
+      --line-soft: rgba(255, 255, 255, 0.045);
+      --text: #e9f0f4;
+      --text-2: #a9b5be;
+      --muted: #6e7c86;
+      --faint: #49545c;
+      --accent: #8ff0c0;
+      --accent-dim: rgba(143, 240, 192, 0.45);
+      --amber: #e6c15c;
+      --red: #ff7b72;
+      --blue: #8cc8ff;
+      --violet: #b784ff;
+      --gap: 6px;
+      --gx: 220px;
+      --gy: 18px;
+      --gw: 1081px;
+      --gh: 637px;
+      --mono: "Cascadia Mono", Consolas, "Microsoft YaHei UI", monospace;
+      --font: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI",
+        "Microsoft YaHei", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font: 13px/1.45 var(--font);
+      -webkit-font-smoothing: antialiased;
+      user-select: none;
+    }
+    button { font: inherit; color: inherit; border: 0; background: none; }
+
+    #stage {
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(1100px 560px at 8% 0%, rgba(143, 240, 192, 0.055), transparent 62%),
+        radial-gradient(900px 540px at 100% 100%, rgba(140, 200, 255, 0.045), transparent 62%),
+        var(--bg);
+    }
+    #stage::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.85), transparent 75%);
+      pointer-events: none;
+    }
+
+    #game-hole {
+      position: absolute;
+      left: var(--gx);
+      top: var(--gy);
+      width: var(--gw);
+      height: var(--gh);
+      border-radius: 6px;
+      background: #000;
+      box-shadow:
+        0 0 0 1px rgba(143, 240, 192, 0.32),
+        0 0 34px rgba(143, 240, 192, 0.07);
+      pointer-events: none;
+    }
+
+    .panel {
+      position: absolute;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background:
+        linear-gradient(180deg, rgba(17, 23, 29, 0.97), rgba(9, 13, 17, 0.97));
+      box-shadow: 0 16px 38px rgba(0, 0, 0, 0.36);
+    }
+
+    .left {
+      left: 0;
+      top: 0;
+      width: calc(var(--gx) - var(--gap));
+      height: calc(var(--gy) + var(--gh));
+    }
+    .right {
+      left: calc(var(--gx) + var(--gw) + var(--gap));
+      top: 0;
+      right: 0;
+      bottom: 0;
+    }
+    .bottom {
+      left: 0;
+      top: calc(var(--gy) + var(--gh) + var(--gap));
+      width: calc(var(--gx) + var(--gw));
+      bottom: 0;
+    }
+    body[data-layout="compact"] .left { display: none; }
+
+    .panel-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 38px;
+      padding: 0 12px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.032), transparent);
+    }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--muted);
+      font: 650 9px/1 var(--mono);
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .eyebrow::before {
+      content: "";
+      width: 5px;
+      height: 5px;
+      border-radius: 1px;
+      background: var(--accent);
+      box-shadow: 0 0 8px rgba(143, 240, 192, 0.65);
+    }
+    .count {
+      margin-left: auto;
+      color: var(--text-2);
+      font: 600 10px/1 var(--mono);
+      white-space: nowrap;
+    }
+    .status {
+      padding: 3px 6px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      color: var(--muted);
+      font: 600 9px/1 var(--mono);
+      white-space: nowrap;
+    }
+    .status.ok {
+      border-color: rgba(143, 240, 192, 0.34);
+      background: rgba(143, 240, 192, 0.055);
+      color: var(--accent);
+    }
+    .status.waiting {
+      border-color: rgba(230, 193, 92, 0.34);
+      background: rgba(230, 193, 92, 0.06);
+      color: var(--amber);
+    }
+
+    .ops {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      flex-direction: column;
+      gap: 5px;
+      overflow-y: auto;
+      padding: 7px;
+    }
+    .ops::-webkit-scrollbar,
+    .enemies::-webkit-scrollbar { width: 4px; }
+    .ops::-webkit-scrollbar-thumb,
+    .enemies::-webkit-scrollbar-thumb {
+      background: #26323a;
+      border-radius: 4px;
+    }
+
+    .op {
+      display: grid;
+      grid-template-columns: 36px minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      padding: 7px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.018);
+    }
+    .op.selected {
+      border-color: rgba(143, 240, 192, 0.5);
+      background: linear-gradient(90deg, rgba(143, 240, 192, 0.10), rgba(143, 240, 192, 0.015));
+      box-shadow: inset 2px 0 0 var(--accent);
+    }
+    .avatar {
+      display: grid;
+      width: 36px;
+      height: 36px;
+      place-items: center;
+      border-radius: 7px;
+      color: #07100b;
+      font-size: 14px;
+      font-weight: 750;
+      letter-spacing: -0.02em;
+      background: linear-gradient(135deg, #a8f6cf, #62c99b);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+    }
+    .avatar.a2 { background: linear-gradient(135deg, #b4dcff, #6b9de0); color: #071018; }
+    .avatar.a3 { background: linear-gradient(135deg, #f7d894, #d5a653); color: #171006; }
+    .avatar.a4 { background: linear-gradient(135deg, #f6b3ae, #d9746e); color: #180808; }
+    .avatar.a5 { background: linear-gradient(135deg, #d4c2ff, #9878e0); color: #0d0818; }
+    .avatar.a6 { background: linear-gradient(135deg, #b9ece6, #63bdb2); color: #06110f; }
+    .avatar.a7 { background: linear-gradient(135deg, #ffd0a8, #d99052); color: #160d05; }
+    .avatar.a8 { background: linear-gradient(135deg, #c8d3dc, #8797a5); color: #080d12; }
+    .avatar.a9 { background: linear-gradient(135deg, #f5c2e7, #c77bb7); color: #160713; }
+
+    .op-main { min-width: 0; }
+    .op-name {
+      display: flex;
+      align-items: baseline;
+      gap: 5px;
+      overflow: hidden;
+      font-size: 12.5px;
+      font-weight: 650;
+      letter-spacing: -0.015em;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .op-name .cost {
+      color: var(--amber);
+      font: 600 9px/1 var(--mono);
+    }
+    .op-sub {
+      overflow: hidden;
+      margin-top: 1px;
+      color: var(--muted);
+      font: 9px/1.2 var(--mono);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .bar {
+      overflow: hidden;
+      height: 4px;
+      margin-top: 5px;
+      border-radius: 2px;
+      background: #1a2228;
+    }
+    .bar > i {
+      display: block;
+      height: 100%;
+      border-radius: 2px;
+      background: linear-gradient(90deg, #66d9a5, var(--accent));
+    }
+    .bar.sp { height: 3px; margin-top: 3px; background: #172027; }
+    .bar.sp > i { background: linear-gradient(90deg, #5b8fe0, var(--blue)); }
+    .op-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 6px;
+      margin-top: 4px;
+      color: var(--faint);
+      font: 8.5px/1 var(--mono);
+    }
+
+    .skill {
+      padding: 4px 6px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      color: var(--muted);
+      font: 600 8.5px/1 var(--mono);
+      white-space: nowrap;
+    }
+    .skill.ready {
+      border-color: rgba(143, 240, 192, 0.38);
+      background: rgba(143, 240, 192, 0.07);
+      color: var(--accent);
+    }
+    .skill.active {
+      border-color: rgba(230, 193, 92, 0.42);
+      background: rgba(230, 193, 92, 0.08);
+      color: var(--amber);
+    }
+
+    .right-body {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      flex-direction: column;
+    }
+    .wave {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--line-soft);
+      color: var(--text-2);
+      font: 600 10px/1 var(--mono);
+    }
+    .wave .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--red);
+      box-shadow: 0 0 8px rgba(255, 123, 114, 0.65);
+    }
+    .wave .spacer { flex: 1; }
+    .wave .muted { color: var(--muted); font-weight: 500; }
+
+    .enemies {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+    }
+    .enemy {
+      display: grid;
+      grid-template-columns: 30px minmax(0, 1fr) auto;
+      gap: 9px;
+      align-items: center;
+      padding: 8px 11px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .enemy:hover { background: rgba(255, 255, 255, 0.025); }
+    .enemy-icon {
+      display: grid;
+      width: 30px;
+      height: 30px;
+      place-items: center;
+      border: 1px solid #2a343c;
+      border-radius: 5px;
+      background:
+        linear-gradient(135deg, rgba(255, 123, 114, 0.18), rgba(255, 123, 114, 0.03)),
+        #11171c;
+      color: #ffb0aa;
+      font: 700 10px/1 var(--mono);
+    }
+    .enemy-icon.elite { color: var(--amber); border-color: #3c3524; }
+    .enemy-icon.boss { color: #ff8a81; border-color: #472824; background: linear-gradient(135deg, rgba(255, 123, 114, 0.24), rgba(183, 132, 255, 0.05)), #14141b; }
+    .enemy-main { min-width: 0; }
+    .enemy-name {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      overflow: hidden;
+      font-size: 12px;
+      font-weight: 600;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .enemy-sub {
+      display: flex;
+      gap: 6px;
+      margin-top: 2px;
+      color: var(--muted);
+      font: 8.5px/1 var(--mono);
+    }
+    .enemy .bar { height: 3px; margin-top: 4px; }
+    .enemy .bar > i { background: linear-gradient(90deg, #d8665e, #ff8f86); }
+    .enemy.elite .bar > i { background: linear-gradient(90deg, #c8a247, var(--amber)); }
+    .enemy.boss .bar > i { background: linear-gradient(90deg, #d45a62, #ff8a81); }
+    .enemy-meta {
+      text-align: right;
+      color: var(--muted);
+      font: 8.5px/1.3 var(--mono);
+      white-space: nowrap;
+    }
+    .tag {
+      padding: 2px 4px;
+      border: 1px solid #2a343c;
+      border-radius: 3px;
+      color: var(--text-2);
+      font: 600 8px/1 var(--mono);
+    }
+    .tag.elite { border-color: rgba(230, 193, 92, 0.35); color: var(--amber); }
+    .tag.boss { border-color: rgba(255, 123, 114, 0.45); color: #ff9b94; }
+    .tag.air { border-color: rgba(140, 200, 255, 0.35); color: var(--blue); }
+
+    .demo-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      align-items: center;
+      padding: 9px 10px;
+      border-top: 1px solid var(--line);
+      background: rgba(0, 0, 0, 0.12);
+    }
+    .demo-pill {
+      padding: 4px 6px;
+      border: 1px solid rgba(230, 193, 92, 0.35);
+      border-radius: 4px;
+      background: rgba(230, 193, 92, 0.07);
+      color: var(--amber);
+      font: 600 8.5px/1 var(--mono);
+      white-space: nowrap;
+    }
+    .demo-bar button {
+      padding: 5px 7px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: #121920;
+      color: var(--text-2);
+      font: 600 8.5px/1 var(--mono);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .demo-bar button:hover {
+      border-color: rgba(143, 240, 192, 0.5);
+      color: var(--accent);
+    }
+    .demo-bar button.danger:hover {
+      border-color: rgba(255, 123, 114, 0.6);
+      color: var(--red);
+    }
+
+    .next-wave,
+    .damage {
+      padding: 8px 12px;
+      border-top: 1px solid var(--line-soft);
+    }
+    .section-label {
+      color: var(--faint);
+      font: 650 8px/1 var(--mono);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+    .next-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-top: 6px;
+    }
+    .next-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-2);
+      font-size: 10px;
+    }
+    .next-frame {
+      width: 34px;
+      color: var(--faint);
+      font: 8px/1 var(--mono);
+    }
+    .next-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--red);
+    }
+    .next-dot.air { background: var(--blue); }
+    .next-dot.elite { background: var(--amber); }
+    .damage-row {
+      display: grid;
+      grid-template-columns: 70px minmax(0, 1fr) 40px;
+      gap: 8px;
+      align-items: center;
+      margin-top: 6px;
+      color: var(--text-2);
+      font-size: 9.5px;
+    }
+    .damage-row .bar {
+      height: 3px;
+      margin: 0;
+    }
+    .damage-row .bar > i {
+      background: linear-gradient(90deg, #5b8fe0, var(--blue));
+    }
+    .damage-row b {
+      color: var(--muted);
+      font: 600 8.5px/1 var(--mono);
+      text-align: right;
+    }
+
+    .timeline-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px 0;
+    }
+    .timeline-title {
+      font-size: 16px;
+      font-weight: 650;
+      letter-spacing: -0.02em;
+    }
+    .timeline-sub {
+      color: var(--muted);
+      font: 9px/1 var(--mono);
+    }
+    .timeline-live {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      margin-left: auto;
+      padding: 3px 6px;
+      border: 1px solid rgba(143, 240, 192, 0.3);
+      border-radius: 4px;
+      color: var(--accent);
+      font: 600 8.5px/1 var(--mono);
+    }
+    .timeline-live::before {
+      content: "";
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 8px rgba(143, 240, 192, 0.8);
+    }
+
+    .timeline-wrap { padding: 10px 14px 0; }
+    .timeline-track {
+      position: relative;
+      height: 74px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: linear-gradient(180deg, #0b1015, #090d11);
+    }
+    .track-grid {
+      position: absolute;
+      inset: 0;
+      background-image: linear-gradient(90deg, rgba(255, 255, 255, 0.055) 1px, transparent 1px);
+      background-size: 10% 100%;
+    }
+    .track-fill {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      width: 71.5%;
+      border-right: 1px solid rgba(143, 240, 192, 0.55);
+      background: linear-gradient(90deg, rgba(143, 240, 192, 0.055), rgba(143, 240, 192, 0.012));
+    }
+    .track-row {
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 1px;
+      background: rgba(255, 255, 255, 0.045);
+    }
+    .track-row.r1 { top: 26px; }
+    .track-row.r2 { top: 50px; }
+    .marker {
+      position: absolute;
+      width: 3px;
+      border-radius: 2px;
+      transform: translateX(-1px);
+    }
+    .marker.deploy { background: var(--accent); box-shadow: 0 0 7px rgba(143, 240, 192, 0.55); }
+    .marker.skill { background: var(--amber); box-shadow: 0 0 7px rgba(230, 193, 92, 0.5); }
+    .marker.withdraw { background: var(--red); box-shadow: 0 0 7px rgba(255, 123, 114, 0.55); }
+    .marker.h1 { top: 10px; height: 14px; }
+    .marker.h2 { top: 34px; height: 12px; }
+    .marker.h3 { top: 57px; height: 10px; }
+    .marker-label {
+      position: absolute;
+      top: 2px;
+      color: var(--muted);
+      font: 7.5px/1 var(--mono);
+      transform: translateX(-50%);
+      white-space: nowrap;
+    }
+    .playhead {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 71.5%;
+      width: 1px;
+      background: var(--accent);
+      box-shadow: 0 0 10px rgba(143, 240, 192, 0.85);
+    }
+    .playhead::after {
+      content: "F1287";
+      position: absolute;
+      top: 3px;
+      left: 4px;
+      padding: 2px 4px;
+      border-radius: 3px;
+      background: #0b1511;
+      color: var(--accent);
+      font: 600 7.5px/1 var(--mono);
+    }
+    .timeline-scale {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 4px;
+      color: var(--faint);
+      font: 8px/1 var(--mono);
+    }
+
+    .lanes { padding: 8px 14px 0; }
+    .lane {
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr);
+      gap: 8px;
+      align-items: center;
+      height: 20px;
+    }
+    .lane-name {
+      overflow: hidden;
+      color: var(--muted);
+      font: 8.5px/1 var(--mono);
+      text-align: right;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .lane-track {
+      position: relative;
+      height: 9px;
+      border: 1px solid rgba(255, 255, 255, 0.035);
+      border-radius: 3px;
+      background: #0e1419;
+    }
+    .lane-bar {
+      position: absolute;
+      top: 1px;
+      bottom: 1px;
+      border-radius: 2px;
+      background: rgba(143, 240, 192, 0.38);
+    }
+    .lane-bar.skill { background: rgba(230, 193, 92, 0.62); }
+    .lane-bar.withdraw { background: rgba(255, 123, 114, 0.62); }
+
+    .timeline-events {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 6px;
+      padding: 9px 14px 0;
+    }
+    .event {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 7px;
+      padding: 6px 8px;
+      border: 1px solid var(--line-soft);
+      border-radius: 5px;
+      background: rgba(255, 255, 255, 0.015);
+    }
+    .event .dot {
+      width: 5px;
+      height: 5px;
+      flex: none;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+    .event.skill .dot { background: var(--amber); }
+    .event.withdraw .dot { background: var(--red); }
+    .event .frame {
+      color: var(--faint);
+      font: 8px/1 var(--mono);
+      white-space: nowrap;
+    }
+    .event .label {
+      overflow: hidden;
+      color: var(--text-2);
+      font-size: 10px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .timeline-foot {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-top: auto;
+      padding: 8px 14px;
+      border-top: 1px solid var(--line-soft);
+      color: var(--muted);
+      font: 8.5px/1 var(--mono);
+    }
+    .timeline-foot .legend {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .timeline-foot .legend i {
+      width: 5px;
+      height: 5px;
+      border-radius: 1px;
+      background: var(--accent);
+    }
+    .timeline-foot .legend.skill i { background: var(--amber); }
+    .timeline-foot .legend.withdraw i { background: var(--red); }
+    .timeline-foot .spacer { flex: 1; }
+    .timeline-foot .demo-note { color: var(--faint); }
+
+    #waiting {
+      position: absolute;
+      left: var(--gx);
+      top: var(--gy);
+      display: grid;
+      width: var(--gw);
+      height: var(--gh);
+      place-items: center;
+      border: 1px dashed rgba(143, 240, 192, 0.24);
+      border-radius: 6px;
+      background: rgba(4, 6, 8, 0.88);
+    }
+    #waiting[hidden] { display: none !important; }
+    .waiting-card {
+      display: flex;
+      max-width: 320px;
+      flex-direction: column;
+      align-items: center;
+      gap: 7px;
+      padding: 18px;
+      text-align: center;
+    }
+    .waiting-card strong { font-size: 14px; font-weight: 650; }
+    .waiting-card span { color: var(--muted); font-size: 11px; }
+    .spinner {
+      width: 24px;
+      height: 24px;
+      margin-bottom: 2px;
+      border: 2px solid rgba(143, 240, 192, 0.16);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--text-2);
+      font: 650 9px/1 var(--mono);
+      letter-spacing: 0.08em;
+    }
+    .brand .bb {
+      display: grid;
+      width: 18px;
+      height: 18px;
+      place-items: center;
+      border-radius: 5px;
+      background: linear-gradient(135deg, #b9f7d8, #6fd3a5);
+      color: #07100b;
+      font: 800 8px/1 var(--mono);
+    }
+  </style>
+</head>
+<body data-layout="frame" data-attached="false">
+  <div id="stage">
+    <div id="game-hole"></div>
+
+    <section class="panel left" id="leftPanel">
+      <div class="panel-head">
+        <span class="eyebrow">Deployment</span>
+        <span class="count">9 / 9</span>
+      </div>
+      <div class="ops">
+        <article class="op selected">
+          <div class="avatar">夜</div>
+          <div class="op-main">
+            <div class="op-name">麒麟R夜刀 <span class="cost">8</span></div>
+            <div class="op-sub">特种 · 近战</div>
+            <div class="bar"><i style="width:100%"></i></div>
+            <div class="bar sp"><i style="width:80%"></i></div>
+            <div class="op-meta"><span>HP 1629</span><span>SP 32/40</span></div>
+          </div>
+          <span class="skill ready">技能</span>
+        </article>
+        <article class="op">
+          <div class="avatar a2">令</div>
+          <div class="op-main">
+            <div class="op-name">令 <span class="cost">10</span></div>
+            <div class="op-sub">辅助 · 召唤</div>
+            <div class="bar"><i style="width:100%"></i></div>
+            <div class="bar sp"><i style="width:100%"></i></div>
+            <div class="op-meta"><span>HP 1079</span><span>SP 40/40</span></div>
+          </div>
+          <span class="skill active">开启中</span>
+        </article>
+        <article class="op">
+          <div class="avatar a3">遥</div>
+          <div class="op-main">
+            <div class="op-name">遥 <span class="cost">11</span></div>
+            <div class="op-sub">近卫 · 群攻</div>
+            <div class="bar"><i style="width:74%"></i></div>
+            <div class="bar sp"><i style="width:60%"></i></div>
+            <div class="op-meta"><span>HP 1762</span><span>SP 18/30</span></div>
+          </div>
+          <span class="skill">蓄力</span>
+        </article>
+        <article class="op">
+          <div class="avatar a4">锏</div>
+          <div class="op-main">
+            <div class="op-name">锏 <span class="cost">14</span></div>
+            <div class="op-sub">近卫 · 爆发</div>
+            <div class="bar"><i style="width:100%"></i></div>
+            <div class="bar sp"><i style="width:90%"></i></div>
+            <div class="op-meta"><span>HP 2110</span><span>SP 27/30</span></div>
+          </div>
+          <span class="skill ready">技能</span>
+        </article>
+        <article class="op">
+          <div class="avatar a5">莺</div>
+          <div class="op-main">
+            <div class="op-name">夜莺 <span class="cost">16</span></div>
+            <div class="op-sub">医疗 · 群奶</div>
+            <div class="bar"><i style="width:100%"></i></div>
+            <div class="bar sp"><i style="width:75%"></i></div>
+            <div class="op-meta"><span>HP 1480</span><span>SP 45/60</span></div>
+          </div>
+          <span class="skill">待命</span>
+        </article>
+        <article class="op">
+          <div class="avatar a6">闪</div>
+          <div class="op-main">
+            <div class="op-name">闪灵 <span class="cost">18</span></div>
+            <div class="op-sub">医疗 · 护盾</div>
+            <div class="bar"><i style="width:100%"></i></div>
+            <div class="bar sp"><i style="width:100%"></i></div>
+            <div class="op-meta"><span>HP 1520</span><span>SP 60/60</span></div>
+          </div>
+          <span class="skill ready">技能</span>
+        </article>
+        <article class="op">
+          <div class="avatar a7">羊</div>
+          <div class="op-main">
+            <div class="op-name">艾雅法拉 <span class="cost">21</span></div>
+            <div class="op-sub">术师 · 火山</div>
+            <div class="bar"><i style="width:100%"></i></div>
+            <div class="bar sp"><i style="width:27%"></i></div>
+            <div class="op-meta"><span>HP 1290</span><span>SP 12/45</span></div>
+          </div>
+          <span class="skill">蓄力</span>
+        </article>
+        <article class="op">
+          <div class="avatar a8">塞</div>
+          <div class="op-main">
+            <div class="op-name">塞雷娅 <span class="cost">22</span></div>
+            <div class="op-sub">重装 · 治疗</div>
+            <div class="bar"><i style="width:100%"></i></div>
+            <div class="bar sp"><i style="width:75%"></i></div>
+            <div class="op-meta"><span>HP 3010</span><span>SP 30/40</span></div>
+          </div>
+          <span class="skill">待命</span>
+        </article>
+        <article class="op">
+          <div class="avatar a9">能</div>
+          <div class="op-main">
+            <div class="op-name">能天使 <span class="cost">12</span></div>
+            <div class="op-sub">狙击 · 连射</div>
+            <div class="bar"><i style="width:100%"></i></div>
+            <div class="bar sp"><i style="width:0%"></i></div>
+            <div class="op-meta"><span>HP 1350</span><span>SP 0/30</span></div>
+          </div>
+          <span class="skill">冷却</span>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel right" id="rightPanel">
+      <div class="panel-head">
+        <span class="brand"><span class="bb">BB</span>DOCK</span>
+        <span class="eyebrow" style="margin-left:6px">Enemies</span>
+        <span class="count" id="statusPillWrap">
+          <span class="status waiting" id="statusPill">等待游戏</span>
+        </span>
+      </div>
+      <div class="right-body">
+        <div class="wave">
+          <span class="dot"></span>
+          <span>第 3 波</span>
+          <span class="muted">· 剩余 22</span>
+          <span class="spacer"></span>
+          <span class="muted">12 / 34</span>
+        </div>
+        <div class="enemies">
+          <div class="enemy boss">
+            <div class="enemy-icon boss">B</div>
+            <div class="enemy-main">
+              <div class="enemy-name">霜星 <span class="tag boss">BOSS</span></div>
+              <div class="enemy-sub"><span>R6 · C6</span><span>路径 2</span><span>未阻挡</span></div>
+              <div class="bar"><i style="width:75%"></i></div>
+            </div>
+            <div class="enemy-meta">24000<br>30s</div>
+          </div>
+          <div class="enemy elite">
+            <div class="enemy-icon elite">E</div>
+            <div class="enemy-main">
+              <div class="enemy-name">萨卡兹魔剑士 <span class="tag elite">精英</span></div>
+              <div class="enemy-sub"><span>R4 · C7</span><span>路径 1</span><span>阻挡中</span></div>
+              <div class="bar"><i style="width:70%"></i></div>
+            </div>
+            <div class="enemy-meta">4200<br>12s</div>
+          </div>
+          <div class="enemy elite">
+            <div class="enemy-icon elite">E</div>
+            <div class="enemy-main">
+              <div class="enemy-name">重装防御者 <span class="tag elite">精英</span></div>
+              <div class="enemy-sub"><span>R2 · C4</span><span>路径 1</span><span>阻挡中</span></div>
+              <div class="bar"><i style="width:87%"></i></div>
+            </div>
+            <div class="enemy-meta">7800<br>--</div>
+          </div>
+          <div class="enemy">
+            <div class="enemy-icon">A</div>
+            <div class="enemy-main">
+              <div class="enemy-name">无人机 <span class="tag air">空中</span></div>
+              <div class="enemy-sub"><span>R5 · C9</span><span>路径 3</span><span>不可阻挡</span></div>
+              <div class="bar"><i style="width:66%"></i></div>
+            </div>
+            <div class="enemy-meta">1200<br>8s</div>
+          </div>
+          <div class="enemy elite">
+            <div class="enemy-icon elite">E</div>
+            <div class="enemy-main">
+              <div class="enemy-name">术师组长 <span class="tag elite">精英</span></div>
+              <div class="enemy-sub"><span>R3 · C2</span><span>路径 2</span><span>未阻挡</span></div>
+              <div class="bar"><i style="width:69%"></i></div>
+            </div>
+            <div class="enemy-meta">3600<br>15s</div>
+          </div>
+          <div class="enemy">
+            <div class="enemy-icon">S</div>
+            <div class="enemy-main">
+              <div class="enemy-name">源石虫 <span class="tag">普通</span></div>
+              <div class="enemy-sub"><span>R1 · C1</span><span>路径 1</span><span>未阻挡</span></div>
+              <div class="bar"><i style="width:38%"></i></div>
+            </div>
+            <div class="enemy-meta">900<br>20s</div>
+          </div>
+          <div class="enemy">
+            <div class="enemy-icon">S</div>
+            <div class="enemy-main">
+              <div class="enemy-name">源石虫 <span class="tag">普通</span></div>
+              <div class="enemy-sub"><span>R1 · C2</span><span>路径 1</span><span>未阻挡</span></div>
+              <div class="bar"><i style="width:38%"></i></div>
+            </div>
+            <div class="enemy-meta">900<br>21s</div>
+          </div>
+        </div>
+        <div class="next-wave">
+          <div class="section-label">Next Wave</div>
+          <div class="next-list">
+            <div class="next-item"><span class="next-frame">F1310</span><span class="next-dot air"></span>无人机 × 2 · 空中</div>
+            <div class="next-item"><span class="next-frame">F1360</span><span class="next-dot elite"></span>萨卡兹魔剑士 × 1</div>
+            <div class="next-item"><span class="next-frame">F1410</span><span class="next-dot"></span>源石虫 × 4 · 路径 1</div>
+          </div>
+        </div>
+        <div class="damage">
+          <div class="section-label">Damage Share</div>
+          <div class="damage-row"><span>麒麟R夜刀</span><div class="bar"><i style="width:72%"></i></div><b>42.1k</b></div>
+          <div class="damage-row"><span>令</span><div class="bar"><i style="width:54%"></i></div><b>31.8k</b></div>
+          <div class="damage-row"><span>锏</span><div class="bar"><i style="width:42%"></i></div><b>24.6k</b></div>
+        </div>
+        <div class="demo-bar">
+          <span class="demo-pill">静态演示</span>
+          <button type="button" data-action="layout-frame">环绕 1600×900</button>
+          <button type="button" data-action="layout-compact">紧凑 1920×1080</button>
+          <button type="button" data-action="resnap">重新吸附</button>
+          <button type="button" class="danger" data-action="exit">退出</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel bottom" id="bottomPanel">
+      <div class="timeline-head">
+        <span class="eyebrow">Timeline</span>
+        <span class="timeline-title">时间轴</span>
+        <span class="timeline-sub" id="layoutLabel">环绕布局</span>
+        <span class="timeline-live">LIVE</span>
+      </div>
+      <div class="timeline-wrap">
+        <div class="timeline-track">
+          <div class="track-grid"></div>
+          <div class="track-fill"></div>
+          <div class="track-row r1"></div>
+          <div class="track-row r2"></div>
+          <div class="marker deploy h1" style="left:8%"></div>
+          <div class="marker skill h2" style="left:15%"></div>
+          <div class="marker deploy h1" style="left:21%"></div>
+          <div class="marker withdraw h3" style="left:27%"></div>
+          <div class="marker skill h2" style="left:34%"></div>
+          <div class="marker deploy h1" style="left:41%"></div>
+          <div class="marker skill h2" style="left:49%"></div>
+          <div class="marker deploy h1" style="left:57%"></div>
+          <div class="marker skill h2" style="left:64%"></div>
+          <div class="marker withdraw h3" style="left:78%"></div>
+          <div class="marker skill h2" style="left:86%"></div>
+          <div class="playhead"></div>
+        </div>
+        <div class="timeline-scale">
+          <span>0s</span><span>15s</span><span>30s</span><span>45s</span><span>60s</span>
+        </div>
+      </div>
+      <div class="timeline-events">
+        <div class="event"><span class="dot"></span><span class="frame">F1180</span><span class="label">部署 · 麒麟R夜刀</span></div>
+        <div class="event skill"><span class="dot"></span><span class="frame">F1244</span><span class="label">技能 · 令</span></div>
+        <div class="event"><span class="dot"></span><span class="frame">F1262</span><span class="label">部署 · 锏</span></div>
+      </div>
+      <div class="lanes">
+        <div class="lane">
+          <span class="lane-name">夜刀</span>
+          <div class="lane-track">
+            <i class="lane-bar" style="left:8%;width:9%"></i>
+            <i class="lane-bar skill" style="left:34%;width:11%"></i>
+            <i class="lane-bar" style="left:57%;width:8%"></i>
+          </div>
+        </div>
+        <div class="lane">
+          <span class="lane-name">令</span>
+          <div class="lane-track">
+            <i class="lane-bar" style="left:15%;width:7%"></i>
+            <i class="lane-bar skill" style="left:49%;width:9%"></i>
+          </div>
+        </div>
+        <div class="lane">
+          <span class="lane-name">遥</span>
+          <div class="lane-track">
+            <i class="lane-bar" style="left:21%;width:6%"></i>
+            <i class="lane-bar skill" style="left:64%;width:12%"></i>
+          </div>
+        </div>
+        <div class="lane">
+          <span class="lane-name">锏</span>
+          <div class="lane-track">
+            <i class="lane-bar" style="left:27%;width:5%"></i>
+            <i class="lane-bar skill" style="left:86%;width:8%"></i>
+          </div>
+        </div>
+      </div>
+      <div class="timeline-foot">
+        <span class="legend"><i></i>部署</span>
+        <span class="legend skill"><i></i>技能</span>
+        <span class="legend withdraw"><i></i>撤退</span>
+        <span class="spacer"></span>
+        <span>F 1287 · 42.9s</span>
+        <span class="demo-note">静态数据 · 无实际命令</span>
+      </div>
+    </section>
+
+    <div id="waiting">
+      <div class="waiting-card">
+        <div class="spinner"></div>
+        <strong>等待 Arknights 窗口</strong>
+        <span>启动测试客户端后会自动附着；也可以点右侧“重新吸附”。</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    "use strict";
+
+    const root = document.documentElement;
+    const body = document.body;
+    const waiting = document.getElementById("waiting");
+    const statusPill = document.getElementById("statusPill");
+    const layoutLabel = document.getElementById("layoutLabel");
+    const viewport = { w: 1707, h: 1019 };
+
+    function applyLayout(message) {
+      const game = message.game || { x: 220, y: 18, w: 1081, h: 637 };
+      root.style.setProperty("--gx", game.x + "px");
+      root.style.setProperty("--gy", game.y + "px");
+      root.style.setProperty("--gw", game.w + "px");
+      root.style.setProperty("--gh", game.h + "px");
+      if (message.viewport) {
+        viewport.w = message.viewport.w;
+        viewport.h = message.viewport.h;
+      }
+      body.dataset.layout = message.layout === "compact" ? "compact" : "frame";
+      body.dataset.attached = message.attached ? "true" : "false";
+      waiting.hidden = !!message.attached;
+      statusPill.textContent = message.attached ? "已附着" : "等待游戏";
+      statusPill.className = "status " + (message.attached ? "ok" : "waiting");
+      layoutLabel.textContent =
+        body.dataset.layout === "compact" ? "紧凑布局" : "环绕布局";
+    }
+
+    function send(action) {
+      window.chrome?.webview?.postMessage({ type: "action", action });
+    }
+
+    document.querySelectorAll("[data-action]").forEach((button) => {
+      button.addEventListener("click", () => send(button.dataset.action));
+    });
+
+    window.chrome?.webview?.addEventListener("message", (event) => {
+      let message = event.data;
+      if (typeof message === "string") {
+        try {
+          message = JSON.parse(message);
+        } catch {
+          return;
+        }
+      }
+      if (!message || typeof message !== "object") return;
+      if (message.type === "layout") {
+        applyLayout(message);
+      } else if (message.type === "state") {
+        const attached = message.state === "attached";
+        body.dataset.attached = attached ? "true" : "false";
+        statusPill.textContent = attached ? "已附着" : "等待游戏";
+        statusPill.className = "status " + (attached ? "ok" : "waiting");
+      }
+    });
+
+    applyLayout({
+      layout: "frame",
+      attached: false,
+      game: { x: 220, y: 18, w: 1081, h: 637 },
+      viewport,
+    });
+  </script>
+</body>
+</html>

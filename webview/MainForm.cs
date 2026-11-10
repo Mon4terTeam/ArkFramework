@@ -42,6 +42,7 @@ internal sealed class MainForm : Form
     private readonly string _logPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "BetterBattleWeb", "host.log");
+    private readonly GameWindowAttachment _gameWindow;
 
     private sealed class FixtureStep
     {
@@ -76,8 +77,14 @@ internal sealed class MainForm : Form
         AutoScaleMode = AutoScaleMode.Dpi;
         BackColor = System.Drawing.Color.FromArgb(12, 15, 22);
         Controls.Add(_webView);
+        _gameWindow = new GameWindowAttachment(
+            this, _webView, Log, PostUiMessage);
         Load += async (_, _) => await InitializeWebViewAsync();
-        FormClosing += (_, _) => _cts.Cancel();
+        FormClosing += (_, _) =>
+        {
+            _gameWindow.Dispose();
+            _cts.Cancel();
+        };
     }
 
     private async Task InitializeWebViewAsync()
@@ -180,6 +187,12 @@ internal sealed class MainForm : Form
                 root.TryGetProperty("message", out var logMessage))
             {
                 Log("web: " + (logMessage.GetString() ?? ""));
+                return;
+            }
+            if (messageType is "gameview-enter" or "gameview-layout" or
+                "gameview-leave" or "gameview-detach")
+            {
+                HandleGameViewMessage(messageType, root);
                 return;
             }
             if (messageType == "timeline-files")
@@ -310,6 +323,55 @@ internal sealed class MainForm : Form
         {
             Log("bad web message: " + error.Message);
         }
+    }
+
+    private void HandleGameViewMessage(string type, JsonElement root)
+    {
+        if (type == "gameview-leave")
+        {
+            _gameWindow.Leave();
+            return;
+        }
+        if (type == "gameview-detach")
+        {
+            _gameWindow.DetachAndShow();
+            return;
+        }
+        if (!root.TryGetProperty("rect", out var rect) ||
+            rect.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+        var x = ReadDouble(rect, "x");
+        var y = ReadDouble(rect, "y");
+        var width = ReadDouble(rect, "w");
+        var height = ReadDouble(rect, "h");
+        var dpr = ReadDouble(root, "dpr");
+        if (dpr <= 0) dpr = 1.0;
+        if (type == "gameview-enter")
+        {
+            _gameWindow.Enter(x, y, width, height, dpr);
+        }
+        else
+        {
+            _gameWindow.UpdateLayout(x, y, width, height, dpr);
+        }
+    }
+
+    private static double ReadDouble(JsonElement element, string name)
+    {
+        if (!element.TryGetProperty(name, out var value)) return 0;
+        if (value.ValueKind == JsonValueKind.Number &&
+            value.TryGetDouble(out var number))
+        {
+            return number;
+        }
+        if (value.ValueKind == JsonValueKind.String &&
+            double.TryParse(value.GetString(), out number))
+        {
+            return number;
+        }
+        return 0;
     }
 
     private static bool IsAssetKind(string kind)

@@ -90,7 +90,12 @@ private:
     std::unordered_map<std::string, double> last_effective_hp_by_id_;
     std::unordered_map<std::string, double> last_minus_hp_by_id_;
     std::mutex regen_mutex_;
-    std::unordered_map<std::string, double> regen_pending_;
+    struct PendingRegen {
+        std::string id;
+        std::uint32_t uid = 0;
+        double amount = 0;
+    };
+    std::unordered_map<std::string, PendingRegen> regen_pending_;
 
     bool battle_active_ = false;
     bool battle_ended_ = false;

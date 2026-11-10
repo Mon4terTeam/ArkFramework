@@ -55,6 +55,13 @@ struct ArkBattleEvent {
     std::string target_id;
     std::string original_source_id;
     std::string stage_id;
+
+    // Runtime instance identity of the involved BattleObject. These are only
+    // meaningful inside the current battle; display code uses them to resolve
+    // the stable per-battle enemy serial (#1, #2, ...).
+    std::uint32_t source_uid = 0;
+    std::uint32_t target_uid = 0;
+    std::uint32_t original_source_uid = 0;
 };
 
 struct ArkBattleEventReadStatus {

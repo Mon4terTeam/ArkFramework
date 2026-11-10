@@ -6,7 +6,7 @@
   function selectEnemy(uid, focus = false) {
     const value = Number(uid);
     if (!Number.isFinite(value) || value <= 0) return;
-    state.selectedEnemyUid = value;
+    window.BetterBattleSession?.selectEnemy(value);
     renderEnemies();
     if (focus) {
       const now = Date.now();
@@ -42,6 +42,65 @@
 
   function enemyProfileFor(profiles, id) {
     return profiles.get(String(id || "")) || null;
+  }
+
+  function enemyDisplayLabel(id, profiles, enemies = [], serialOverride = 0) {
+    const enemyId = String(id || "");
+    const profile = enemyProfileFor(profiles, enemyId);
+    const name = (
+      profile?.name && profile.name !== enemyId ? profile.name : ""
+    ) || "未知敌人";
+    const serials = [...new Set(
+      (Array.isArray(enemies) ? enemies : [])
+        .filter((enemy) => String(enemy?.id || "") === enemyId)
+        .map((enemy) => Number(enemy?.serial) || 0)
+        .filter((serial) => serial > 0),
+    )].sort((left, right) => left - right);
+    const serial = Number(serialOverride) || (serials.length === 1 ? serials[0] : 0);
+    return serial ? `#${serial} ${name}` : name;
+  }
+
+  function enemyDisplayLabelByUid(uid, identities, profiles, enemies = []) {
+    const value = Number(uid) || 0;
+    if (!value) return "";
+    let identity = (Array.isArray(identities) ? identities : [])
+      .find((entry) => Number(entry?.uid) === value);
+    if (!identity) {
+      const current = (Array.isArray(enemies) ? enemies : [])
+        .find((enemy) => Number(enemy?.uid) === value);
+      if (current) {
+        identity = { id: current.id, serial: current.serial };
+      }
+    }
+    if (!identity) return "";
+    const id = String(identity.id || "");
+    const profile = enemyProfileFor(profiles, id);
+    const name = (
+      profile?.name && profile.name !== id ? profile.name : ""
+    ) || "未知敌人";
+    const serial = Number(identity.serial) || 0;
+    return serial ? `#${serial} ${name}` : name;
+  }
+
+  window.BetterBattleEnemyDisplay = Object.freeze({
+    profileFor: enemyProfileFor,
+    label: enemyDisplayLabel,
+    labelByUid: enemyDisplayLabelByUid,
+  });
+
+  function enemyStatRows(enemy) {
+    const hp = Number(enemy?.hp) || 0;
+    const maxHp = Number(enemy?.max_hp) || 0;
+    return [
+      ["生命", `${fmtExact(hp)} / ${fmtExact(maxHp)}`],
+      ["攻击", fmt(enemy?.atk, 0)],
+      ["防御", fmt(enemy?.def, 0)],
+      ["法抗", `${fmt(enemy?.magic_resistance, 0)}%`],
+      ["攻速", fmt(enemy?.attack_speed, 0)],
+      ["移速", fmt(enemy?.move_speed, 3)],
+      ["阻挡", String(enemy?.block_count ?? 0)],
+      ["重量", String(enemy?.mass_level ?? 0)],
+    ];
   }
 
   function gameTextHtml(value) {
@@ -85,12 +144,13 @@
 
   function renderEnemies() {
     const snapshot = state.snapshot;
-    const enemies = (Array.isArray(snapshot?.enemies) ? snapshot.enemies : [])
-      .filter((enemy) => enemy && enemy.alive !== false);
-    const profiles = new Map(
-      (Array.isArray(snapshot?.enemy_profiles) ? snapshot.enemy_profiles : [])
-        .map((profile) => [String(profile?.id || ""), profile]),
-    );
+    const enemies = window.BetterBattleSession?.aliveEnemies(snapshot) || [];
+    const profiles = window.BetterBattleSession
+      ? window.BetterBattleSession.enemyProfiles(snapshot)
+      : new Map(
+        (Array.isArray(snapshot?.enemy_profiles) ? snapshot.enemy_profiles : [])
+          .map((profile) => [String(profile?.id || ""), profile]),
+      );
     const waves = snapshot?.enemy_waves || {};
     const waveList = Array.isArray(waves.waves) ? waves.waves : [];
     const waveTotal = Number(waves.total) || 0;
@@ -129,6 +189,12 @@
         const displayName =
           (profile?.name && profile.name !== enemy.id ? profile.name : "") ||
           "未知敌人";
+        const displayLabel = enemyDisplayLabel(
+          enemy.id,
+          profiles,
+          enemies,
+          enemy.serial,
+        );
         const row = Number(enemy.row);
         const col = Number(enemy.col);
         const coordinate = Number.isInteger(row) && row >= 0 &&
@@ -138,7 +204,7 @@
         return `<button type="button" class="enemy-row${uid === Number(state.selectedEnemyUid) ? " is-selected" : ""}${uid === focusUid ? " is-focused" : ""}" data-action="enemy-focus" data-uid="${uid}">
           <span class="enemy-row-avatar"><img data-asset-kind="enemy-icon" data-asset-id="${esc(enemy.id)}" alt="" loading="lazy"></span>
           <span class="enemy-row-main">
-            <span class="enemy-row-name"><span class="enemy-serial">#${Number(enemy.serial) || "?"}</span><span class="enemy-row-name-text">${esc(displayName)}</span></span>
+            <span class="enemy-row-name"><span class="enemy-row-name-text">${esc(displayLabel)}</span></span>
             ${coordinate}
             <span class="enemy-hp"><i style="width:${hpRatio.toFixed(1)}%"></i></span>
           </span>
@@ -198,16 +264,7 @@
       setHtml(dom.enemyTags, tags.length
         ? tags.map((tag) => `<span>${esc(tag)}</span>`).join("")
         : "");
-      const stats = [
-        ["生命", `${fmtExact(hp)} / ${fmtExact(maxHp)}`],
-        ["攻击", fmt(selected.atk, 0)],
-        ["防御", fmt(selected.def, 0)],
-        ["法抗", `${fmt(selected.magic_resistance, 0)}%`],
-        ["攻速", fmt(selected.attack_speed, 0)],
-        ["移速", fmt(selected.move_speed, 3)],
-        ["阻挡", String(selected.block_count ?? 0)],
-        ["重量", String(selected.mass_level ?? 0)],
-      ];
+      const stats = enemyStatRows(selected);
       setHtml(dom.enemyStatGrid, stats.map(([label, value]) =>
         `<div class="enemy-stat"><span>${label}</span><strong>${esc(value)}</strong></div>`,
       ).join(""));
@@ -331,9 +388,10 @@
         const actions = Array.isArray(wave.actions) ? wave.actions : [];
         const spawned = Number(wave.index) <= waveCurrent;
         return `<div class="enemy-wave"><div class="enemy-wave-head"><strong>第 ${Number(wave.index) || "?"} 波</strong><span class="enemy-subtle">${spawned ? "已出场" : "预计"} · ${Number(wave.total) || 0} 个</span></div>
-          <div class="enemy-wave-actions">${actions.map((action) =>
-            `<div class="enemy-wave-action"><strong>${esc(enemyProfileFor(profiles, action.key)?.name || "未知敌人")}</strong><span>×${Number(action.count) || 0}</span><code>${formatDurationValue(Number(action.first_time) || 0)} · R${Number(action.route) >= 0 ? Number(action.route) : "?"}</code></div>`,
-          ).join("")}</div></div>`;
+          <div class="enemy-wave-actions">${actions.map((action) => {
+            const label = enemyDisplayLabel(action.key, profiles, enemies);
+            return `<div class="enemy-wave-action"><strong>${esc(label)}</strong><span>×${Number(action.count) || 0}</span><code>${formatDurationValue(Number(action.first_time) || 0)} · R${Number(action.route) >= 0 ? Number(action.route) : "?"}</code></div>`;
+          }).join("")}</div></div>`;
       }).join("")
       : `<div class="empty-small">该关卡没有可读取的静态波次计划</div>`);
   }

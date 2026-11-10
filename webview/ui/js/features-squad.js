@@ -338,12 +338,7 @@
 
   function battleInProgress(snapshot = state.snapshot) {
     const runtime = window.BetterBattleSession;
-    if (runtime) return runtime.battleActive(snapshot);
-    if (!snapshot) return false;
-    if (snapshot.playing === false) return false;
-    if (Number(snapshot.state) === 3) return false;
-    if (Number(snapshot.state) >= 0) return true;
-    return Array.isArray(snapshot.cards) && snapshot.cards.length > 0;
+    return runtime ? runtime.battleActive(snapshot) : false;
   }
 
   function syncSquadFromSnapshot(rawSquad) {
@@ -715,9 +710,12 @@
     dom.squadLimitHint.textContent =
       `当前关卡上限 ${state.squadLimit} 人，共 ${MAX_SLOTS} 个编队槽位。`;
     dom.squadReplayLock.hidden = !locked;
-    dom.squadReplayLock.textContent = state.replayActive
+    const sessionPhase = window.BetterBattleSession?.phase();
+    dom.squadReplayLock.textContent = sessionPhase === "replay"
       ? "回放中 · 编队已锁定"
-      : "战斗中 · 编队已同步并锁定";
+      : (sessionPhase === "starting"
+        ? "准备中 · 编队已同步并锁定"
+        : "战斗中 · 编队已同步并锁定");
     dom.squadStartButton.textContent =
       state.stageMode === "rogue" ? "进入配置" : "进入战斗";
     dom.squadStartButton.disabled = locked;

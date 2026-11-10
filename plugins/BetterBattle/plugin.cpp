@@ -161,7 +161,8 @@ void LocalBattle::write_status_file(bool publish_web) {
     std::ofstream output(std::filesystem::path(host_.root_directory) / "BetterBattle.status");
     output << (ok ? "ok=1\n" : "ok=0\n") << result << '\n';
     output << "battle=" << (snap.available ? "1" : "0") << " playing=" << snap.playing
-           << " paused=" << snap.paused << " state=" << snap.state << " cost=" << snap.cost
+           << " paused=" << snap.paused << " state=" << snap.state
+           << " phase=" << snap.phase << " cost=" << snap.cost
            << " frame=" << snap.frame << " stage=" << snap.stage_id << '\n';
     output << "trace active=" << (trace_active_ ? 1 : 0)
            << " changes=" << trace_changes_
@@ -581,6 +582,8 @@ std::string LocalBattle::build_web_json(const BattleSnapshot& snap) const {
     root["stage_input"] = snap.stage_input;
     root["stage_code"] = snap.stage_code;
     root["stage_name"] = snap.stage_name;
+    root["available"] = snap.available;
+    root["phase"] = snap.phase;
     root["state"] = snap.state;
     root["playing"] = snap.playing;
     root["paused"] = snap.paused;
@@ -950,6 +953,16 @@ std::string LocalBattle::build_web_json(const BattleSnapshot& snap) const {
         });
     }
     root["enemies"] = std::move(enemies);
+
+    json identities = json::array();
+    for (const EnemyIdentity& identity : snap.enemy_identities) {
+        identities.push_back({
+            {"uid", identity.uid},
+            {"serial", identity.serial},
+            {"id", identity.id},
+        });
+    }
+    root["enemy_identities"] = std::move(identities);
 
     json waves = json::array();
     for (const EnemyWave& wave : snap.enemy_waves) {

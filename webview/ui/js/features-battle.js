@@ -1,10 +1,37 @@
 "use strict";
 
+  let battleEntitiesSnapshot;
+  let battleEntitiesCache = null;
+
+  function battleEntities(snapshot = state.snapshot) {
+    if (snapshot === battleEntitiesSnapshot && battleEntitiesCache) {
+      return battleEntitiesCache;
+    }
+    const snap = snapshot || {};
+    const cards = (Array.isArray(snap.cards) ? snap.cards : [])
+      .filter((card) => !!card);
+    const operatorCards = cards.filter((card) => !isSummonCard(card));
+    const units = (Array.isArray(snap.units) ? snap.units : [])
+      .filter((unit) => mine(unit) && unit.alive);
+    const summons = units.filter(isSummonUnit);
+    battleEntitiesSnapshot = snapshot;
+    battleEntitiesCache = {
+      cards,
+      operatorCards,
+      units,
+      summons,
+      summonNames: summonDisplayNames(summons),
+    };
+    return battleEntitiesCache;
+  }
+
   function renderBattle() {
     const snapshot = state.snapshot;
-    if (!snapshot) {
+    const session = window.BetterBattleSession;
+    const phase = session ? session.phase(snapshot) : "";
+    if (!snapshot || phase === "idle") {
       setPauseButtonState(null);
-      dom.stateBadge.textContent = "等待";
+      dom.stateBadge.textContent = snapshot ? "未战斗" : "等待";
       dom.stateBadge.className = "badge";
       dom.pauseBadge.textContent = "未暂停";
       dom.pauseBadge.className = "badge";
@@ -19,21 +46,36 @@
       return;
     }
 
-    setPauseButtonState(!!snapshot.paused);
-    const cards = (Array.isArray(snapshot.cards) ? snapshot.cards : [])
-      .filter((card) => !!card);
-    const operatorCards = cards.filter((card) => !isSummonCard(card));
-    const units = (Array.isArray(snapshot.units) ? snapshot.units : [])
-      .filter((unit) => mine(unit) && unit.alive);
-    const summons = units.filter(isSummonUnit);
-    const summonNames = summonDisplayNames(summons);
+    setPauseButtonState(
+      phase === "playing" || phase === "paused" ? !!snapshot.paused : null);
+    const {
+      cards,
+      operatorCards,
+      units,
+      summons,
+      summonNames,
+    } = battleEntities(snapshot);
     const selectedSummon = summons.find(
       (unit) => Number(unit.uid) === Number(state.selectedSummonUid)) || null;
     if (!selectedSummon) state.selectedSummonUid = null;
-    dom.stateBadge.textContent = stateName(snapshot.state);
-    dom.stateBadge.className = "badge " + (snapshot.state === 2 ? "green" : snapshot.state === 3 ? "amber" : "");
-    dom.pauseBadge.textContent = snapshot.paused ? "已暂停" : "运行中";
-    dom.pauseBadge.className = "badge " + (snapshot.paused ? "amber" : "green");
+    dom.stateBadge.textContent = session
+      ? session.phaseLabel(snapshot)
+      : stateName(snapshot.state);
+    dom.stateBadge.className = "badge " +
+      (phase === "playing" || phase === "paused" || phase === "replay"
+        ? "green"
+        : (phase === "ended" || phase === "starting" ? "amber" : ""));
+    dom.pauseBadge.textContent =
+      phase === "paused" ? "已暂停"
+        : (phase === "playing" ? "运行中"
+          : (phase === "replay" ? "回放中"
+            : (phase === "ended" ? "已结束"
+              : (phase === "starting" ? "准备中" : "未暂停"))));
+    dom.pauseBadge.className = "badge " +
+      (phase === "playing" || phase === "replay"
+        ? "green"
+        : (phase === "paused" || phase === "ended" ||
+           phase === "starting" ? "amber" : ""));
     dom.deckBadge.textContent =
       `待部署 ${operatorCards.filter((card) =>
         !units.some((unit) => Number(unit.card_uid) === Number(card.uid))).length}`;
@@ -83,18 +125,12 @@
   }
 
   function selectCard(uid) {
-    const value = Number(uid);
-    if (!Number.isFinite(value) || value <= 0) return;
-    state.selectedSummonUid = null;
-    state.selectedCardUid = value;
+    if (!window.BetterBattleSession?.selectCard(uid)) return;
     renderBattle();
   }
 
   function selectSummon(uid) {
-    const value = Number(uid);
-    if (!Number.isFinite(value) || value <= 0) return;
-    state.selectedCardUid = null;
-    state.selectedSummonUid = value;
+    if (!window.BetterBattleSession?.selectSummon(uid)) return;
     renderBattle();
   }
 
@@ -557,6 +593,69 @@
       : "");
   }
 
+  function operatorDetailView(card, unit, nameOverride = "") {
+    const profile = profileForCard(card, unit);
+    const deployed = !!unit;
+    const buffs = deployed ? unitBuffs(unit) : [];
+    const hp = deployed ? (Number(unit.hp) || 0) : 0;
+    const maxHp = deployed ? (Number(unit.max_hp) || 0) : 0;
+    const shield = deployed ? (Number(unit.shield) || 0) : 0;
+    const shieldLayers = deployed ? (Number(unit.shield_layers) || 0) : 0;
+    const minusHp = deployed ? (Number(unit.minus_hp) || 0) : 0;
+    const maxMinusHp = deployed ? (Number(unit.max_minus_hp) || 0) : 0;
+    const skill = profile?.skill || {};
+    const duration = Number(skill.duration) || 0;
+    const cardState = deployState(card);
+    const cardRespawn = cardRespawnRemaining(card);
+    const negativeHpLabel = maxMinusHp > 0.5
+      ? `负血 ${fmt(minusHp, 0)}/${fmt(maxMinusHp, 0)}` : "";
+    const shieldLabel = shield > 0.5
+      ? `屏障 ${fmt(shield, 0)}`
+      : shieldLayers > 0 ? `屏障 ${shieldLayers}层` : "";
+    const cell = (label, value, wide = false, extraClass = "") =>
+      `<div class="stat-cell ${wide ? "wide" : ""} ${extraClass}">` +
+      `<span>${label}</span><strong>${value}</strong></div>`;
+    const statsHtml = deployed
+      ? cell("生命", `${fmt(hp, 0)} / ${fmt(maxHp, 0)}`, true) +
+        (shieldLabel
+          ? cell("屏障", shield > 0.5 ? fmt(shield, 0) : `${shieldLayers} 层`,
+              true, "shield")
+          : "") +
+        (negativeHpLabel
+          ? cell("负生命值", `${fmt(minusHp, 0)} / ${fmt(maxMinusHp, 0)}`,
+              true, "shield")
+          : "") +
+        cell("攻击", fmt(unit.atk, 1)) +
+        cell("防御", fmt(unit.def, 1)) +
+        cell("法抗", fmt(unit.magic_resistance, 1)) +
+        cell("阻挡", esc(unit.block_count)) +
+        cell("费用", esc(unit.unit_cost)) +
+        cell("攻速", fmt(unit.attack_speed, 2)) +
+        cell("状态", unit.alive ? "存活" : "离场")
+      : cell("部署费用", esc(card?.cost ?? "--"), true) +
+        cell("等级", profile ? `Lv.${esc(profile.level)}` : "--") +
+        cell("精英", profile ? `E${esc(profile.evolve)}` : "--") +
+        cell("潜能", profile ? esc(profile.potential) : "--") +
+        cell("技能消耗", `${esc(skill.sp_cost ?? "--")} SP`) +
+        cell("持续时间", duration !== 0 ? fmtDuration(duration) : "--") +
+        cell("卡牌状态", cardState.label) +
+        (cardRespawn > 0
+          ? cell("再部署剩余", fmtDuration(cardRespawn), true)
+          : "") +
+        cell("剩余", esc(card?.remaining ?? "--")) +
+        cell("场上状态", "未部署");
+    return {
+      profile,
+      deployed,
+      buffs,
+      unitBuffs: buffs,
+      statsHtml,
+      statsHint: deployed
+        ? (profile ? `Lv.${profile.level} · E${profile.evolve} · 潜 ${profile.potential}` : "当前战斗数值")
+        : "未部署 · 静态编队数据",
+    };
+  }
+
   function renderFocus(card, unit, nameOverride = "") {
     try {
       renderFocusInner(card, unit, nameOverride);
@@ -741,42 +840,9 @@
       state.focusActionsKey = actionsKey;
     }
 
-    const cell = (label, value, wide = false, extraClass = "") =>
-      `<div class="stat-cell ${wide ? "wide" : ""} ${extraClass}">` +
-      `<span>${label}</span><strong>${value}</strong></div>`;
-    dom.statsHint.textContent = deployed
-      ? (profile ? `Lv.${profile.level} · E${profile.evolve} · 潜 ${profile.potential}` : "当前战斗数值")
-      : "未部署 · 静态编队数据";
-    setHtml(dom.statsGrid,
-      (deployed
-        ? cell("生命", `${fmt(hp, 0)} / ${fmt(maxHp, 0)}`, true) +
-          (shieldLabel
-            ? cell("屏障", shield > 0.5 ? fmt(shield, 0) : `${shieldLayers} 层`,
-                true, "shield")
-            : "") +
-          (negativeHpLabel
-            ? cell("负生命值", `${fmt(minusHp, 0)} / ${fmt(maxMinusHp, 0)}`,
-                true, "shield")
-            : "") +
-          cell("攻击", fmt(unit.atk, 1)) +
-          cell("防御", fmt(unit.def, 1)) +
-          cell("法抗", fmt(unit.magic_resistance, 1)) +
-          cell("阻挡", esc(unit.block_count)) +
-          cell("费用", esc(unit.unit_cost)) +
-          cell("攻速", fmt(unit.attack_speed, 2)) +
-          cell("状态", unit.alive ? "存活" : "离场")
-        : cell("部署费用", esc(card?.cost ?? "--"), true) +
-          cell("等级", profile ? `Lv.${esc(profile.level)}` : "--") +
-          cell("精英", profile ? `E${esc(profile.evolve)}` : "--") +
-          cell("潜能", profile ? esc(profile.potential) : "--") +
-          cell("技能消耗", `${esc(skill.sp_cost ?? "--")} SP`) +
-          cell("持续时间", duration !== 0 ? fmtDuration(duration) : "--") +
-          cell("卡牌状态", cardState.label) +
-          (cardRespawn > 0
-            ? cell("再部署剩余", fmtDuration(cardRespawn), true)
-            : "") +
-          cell("剩余", esc(card?.remaining ?? "--")) +
-          cell("场上状态", "未部署")));
+    const detail = operatorDetailView(card, unit, nameOverride);
+    dom.statsHint.textContent = detail.statsHint;
+    setHtml(dom.statsGrid, detail.statsHtml);
 
     renderStatsAbnormal(deployed ? unit : null, "未部署");
     dom.focusBuffCount.textContent = String(buffs.length);

@@ -249,6 +249,44 @@ void LocalBattle::set_paused(bool paused) {
     }
 }
 
+void LocalBattle::close_battle_session() {
+    cancel_timeline_fast_forward();
+    battle_session_closed_.store(true, std::memory_order_release);
+    remove_replay_hook();
+    replay_active_.store(false, std::memory_order_release);
+    replay_dispatched_ = 0;
+    replay_next_step_ = 0;
+    replay_frame_ = 0;
+    replay_steps_.clear();
+    replay_file_.clear();
+    replay_stop_frame_.store(0, std::memory_order_release);
+    replay_stop_enabled_.store(false, std::memory_order_release);
+    pending_replay_seek_fast_.store(false, std::memory_order_release);
+    pending_replay_seek_target_.store(0, std::memory_order_release);
+    pending_timeline_jump_ = false;
+    pending_timeline_fast_ = false;
+    pending_timeline_play_ = false;
+    pending_timeline_parent_id_.clear();
+    record_active_.store(false, std::memory_order_release);
+    record_dirty_.store(false, std::memory_order_release);
+    {
+        std::lock_guard lock(record_mutex_);
+        frame_actual_operations_.clear();
+        frame_prepared_ = std::numeric_limits<std::uint32_t>::max();
+        frame_policy_ = TimelineFramePolicy::Record;
+    }
+
+    BattleSnapshot idle;
+    idle.available = false;
+    idle.playing = false;
+    idle.paused = false;
+    idle.phase = "idle";
+    idle.state = -1;
+    publish_web_snapshot(idle);
+    publish_snapshot(std::move(idle));
+    write_status_file(false);
+}
+
 void LocalBattle::leave_battle() {
     try {
         cancel_timeline_fast_forward();
@@ -292,6 +330,7 @@ void LocalBattle::leave_battle() {
         scene_.stage = StageInfo{};
         scene_.stage_request.clear();
         clear_static_cache();
+        close_battle_session();
         publish_result("已离开本地战斗，返回 " + scene);
     } catch (const std::exception& error) {
         publish_result(std::string("离开战斗失败：") + error.what(), false);
@@ -329,6 +368,7 @@ bool LocalBattle::route_home_from_finish() {
         scene_.stage = StageInfo{};
         scene_.stage_request.clear();
         clear_static_cache();
+        close_battle_session();
         publish_result("战斗结束，已跳过服务器同步并返回 " + scene);
         log(kLogInfo, "本地战斗结束，已直接返回 " + scene);
         return true;

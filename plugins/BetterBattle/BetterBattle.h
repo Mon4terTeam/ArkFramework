@@ -306,6 +306,12 @@ struct EnemyInfo {
     std::vector<UnitInfo::BuffInfo> buffs;
 };
 
+struct EnemyIdentity {
+    std::uint32_t uid = 0;
+    std::uint32_t serial = 0;
+    std::string id;
+};
+
 struct EnemyProfile {
     std::string id;
     std::string name;
@@ -501,6 +507,7 @@ struct BattleSnapshot {
     bool available = false;
     bool playing = false;
     bool paused = false;
+    std::string phase = "idle";
     int state = -1;
     int cost = -1;
     std::uint32_t frame = 0;
@@ -513,6 +520,7 @@ struct BattleSnapshot {
     std::vector<CardInfo> cards;
     std::vector<UnitInfo> units;
     std::vector<EnemyInfo> enemies;
+    std::vector<EnemyIdentity> enemy_identities;
     std::vector<EnemyProfile> enemy_profiles;
     std::vector<EnemyWave> enemy_waves;
     std::vector<GlobalBuffGroupInfo> global_buffs;
@@ -725,6 +733,8 @@ struct ReplayEvent {
     std::uint32_t frame = 0;
     std::string actor;
     std::string target;
+    std::uint32_t actor_uid = 0;
+    std::uint32_t target_uid = 0;
     std::uint8_t type = 0;
     double actual = 0;
 };
@@ -773,6 +783,12 @@ enum class PendingTimelineMode {
     Jump,
 };
 
+enum class TimelineFramePolicy {
+    Record,
+    CompareOnly,
+    CompareInject,
+};
+
 struct SeedState {
     int requested = -1;
     int observed = -1;
@@ -794,6 +810,7 @@ struct TimelineSession {
         bool tas_allowed = true;
         bool jump = false;
         bool fast = false;
+        bool play = false;
         std::string parent_id;
         std::uint32_t fork_frame = 0;
         bool has_document = false;
@@ -963,9 +980,11 @@ private:
     void write_recording();
     void flush_recording();
     void timeline_action(const std::string& action, const std::string& name,
-                         const std::string& label, int value);
+                         const std::string& label, int value,
+                         bool auto_play = false);
+    void switch_timeline_branch(const std::string& node_id);
     void timeline_jump(std::uint32_t target, const std::string& node_id,
-                       bool fast);
+                       bool fast, bool auto_play = false);
     bool build_timeline_jump_plan(std::uint32_t target, const std::string& node_id,
                                   std::string* parent_id);
     void activate_pending_timeline();
@@ -983,6 +1002,7 @@ private:
     void capture_timeline_metadata(void* controller);
     ReplayMeta replay_meta_locked() const;
     void complete_timeline_jump(std::uint32_t frame, bool from_replay = false);
+    void finish_timeline_rewind(std::uint32_t frame, bool auto_play);
     void timeline_fast_forward(std::uint32_t frames);
     void complete_timeline_fast_forward_if_due(void* controller);
     void cancel_timeline_fast_forward();
@@ -993,7 +1013,9 @@ private:
     void record_timeline_event_locked(std::uint32_t frame,
                                       const std::string& actor,
                                       const std::string& target, std::uint8_t type,
-                                      double actual);
+                                      double actual,
+                                      std::uint32_t actor_uid = 0,
+                                      std::uint32_t target_uid = 0);
     void record_timeline_world_event_locked(std::uint32_t frame,
                                             std::uint8_t kind, int value,
                                             int total);
@@ -1020,6 +1042,12 @@ private:
                      const std::string& node_id = {});
     bool run_fast_replay_seek(void* controller, std::uint32_t target);
     void fork_replay_for_manual_operation(std::uint32_t frame);
+    std::vector<RecordedOperation> expected_operations_locked(
+        std::uint32_t frame) const;
+    bool operations_equal(std::vector<RecordedOperation> left,
+                          std::vector<RecordedOperation> right) const;
+    void timeline_frame_enter(void* controller, std::uint32_t frame);
+    void timeline_frame_commit(std::uint32_t frame);
     std::vector<std::string> timeline_path_to_root_locked(
         const std::string& node_id) const;
     void set_playback_path_locked(const std::string& node_id);
@@ -1036,7 +1064,6 @@ private:
     bool load_replay_plan(const std::string& path);
     bool install_replay_hook();
     bool remove_replay_hook();
-    void replay_fixed_before();
     void dispatch_replay_operation(const RecordedOperation& operation);
     void* replay_card(void* controller, const std::string& unit, std::uint32_t* uid);
     void* replay_character(void* controller, const std::string& unit);
@@ -1074,6 +1101,7 @@ private:
     void set_paused(bool paused);
     void leave_battle();
     bool route_home_from_finish();
+    void close_battle_session();
     void describe_withdraw();
     void tas_bench(const std::string& text, const std::string& path, int value);
     void enforce_spine_auto(void* controller = nullptr);
@@ -1191,6 +1219,7 @@ private:
     std::string last_pending_capture_index_;
     std::atomic<bool> finish_home_pending_{false};
     std::atomic<bool> local_battle_active_{false};
+    std::atomic<bool> battle_session_closed_{true};
     bool finish_bypassed_ = false;
     std::uint64_t next_connect_tick_ = 0;
     std::uint64_t next_refresh_tick_ = 0;
@@ -1316,6 +1345,7 @@ private:
     std::unordered_map<void*, CardInfo> card_static_cache_;
     std::unordered_map<std::uint32_t, UnitInfo> unit_static_cache_;
     std::unordered_map<std::uint32_t, std::uint32_t> enemy_serials_;
+    std::unordered_map<std::uint32_t, std::string> enemy_identity_ids_;
     std::uint32_t next_enemy_serial_ = 1;
     std::uint64_t enemy_scene_revision_ =
         std::numeric_limits<std::uint64_t>::max();
@@ -1397,6 +1427,7 @@ private:
     int& pending_timeline_seed_to_apply_ = timeline_.pending.seed;
     bool& pending_timeline_jump_ = timeline_.pending.jump;
     bool& pending_timeline_fast_ = timeline_.pending.fast;
+    bool& pending_timeline_play_ = timeline_.pending.play;
     std::string& pending_timeline_parent_id_ = timeline_.pending.parent_id;
     std::uint32_t& pending_timeline_fork_frame_ = timeline_.pending.fork_frame;
     std::atomic<std::uint32_t>& timeline_advance_target_ =
@@ -1429,9 +1460,13 @@ private:
     void* record_located_original_ = nullptr;
 
     std::atomic<bool> replay_active_{false};
-    std::atomic<bool> replay_branch_armed_{false};
     std::vector<std::pair<std::uint32_t, std::vector<RecordedOperation>>> replay_steps_;
     std::vector<std::vector<bool>> replay_consumed_;
+    std::map<std::uint32_t, std::vector<RecordedOperation>>
+        frame_actual_operations_;
+    TimelineFramePolicy frame_policy_ = TimelineFramePolicy::Record;
+    std::uint32_t frame_prepared_ =
+        std::numeric_limits<std::uint32_t>::max();
     std::size_t replay_next_step_ = 0;
     std::uint32_t replay_dispatched_ = 0;
     std::uint32_t replay_frame_ = 0;

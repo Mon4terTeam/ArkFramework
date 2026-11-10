@@ -919,6 +919,7 @@ void LocalBattle::refresh_enemies(void* controller, BattleSnapshot& snapshot) {
     if (enemy_scene_revision_ != scene_.revision) {
         enemy_scene_revision_ = scene_.revision;
         enemy_serials_.clear();
+        enemy_identity_ids_.clear();
         next_enemy_serial_ = 1;
         enemy_tile_cache_source_ = nullptr;
         enemy_tile_cache_.clear();
@@ -1044,6 +1045,9 @@ void LocalBattle::refresh_enemies(void* controller, BattleSnapshot& snapshot) {
                 static_cast<double>(entry.created_raw) / kFixedPointScale;
             info.id =
                 method_string(runtime_, entry.object, classes_.entity, "get_id");
+            if (!info.id.empty()) {
+                enemy_identity_ids_[entry.uid] = info.id;
+            }
             const EnemyProfile& profile = enemy_profile(info.id);
             if (profile.skills.empty()) {
                 try {
@@ -1221,10 +1225,33 @@ void LocalBattle::refresh_enemies(void* controller, BattleSnapshot& snapshot) {
               [](const EnemyInfo& left, const EnemyInfo& right) {
                   return left.serial < right.serial;
               });
+    snapshot.enemy_identities.clear();
+    snapshot.enemy_identities.reserve(enemy_serials_.size());
+    for (const auto& [uid, serial] : enemy_serials_) {
+        const auto id = enemy_identity_ids_.find(uid);
+        if (id == enemy_identity_ids_.end() || id->second.empty()) {
+            continue;
+        }
+        EnemyIdentity identity;
+        identity.uid = uid;
+        identity.serial = serial;
+        identity.id = id->second;
+        snapshot.enemy_identities.push_back(std::move(identity));
+    }
+    std::sort(snapshot.enemy_identities.begin(),
+              snapshot.enemy_identities.end(),
+              [](const EnemyIdentity& left, const EnemyIdentity& right) {
+                  return left.serial < right.serial;
+              });
     std::unordered_map<std::string, bool> emitted_profiles;
     for (const EnemyInfo& enemy : snapshot.enemies) {
         if (emitted_profiles.emplace(enemy.id, true).second) {
             snapshot.enemy_profiles.push_back(enemy_profile(enemy.id));
+        }
+    }
+    for (const EnemyIdentity& identity : snapshot.enemy_identities) {
+        if (emitted_profiles.emplace(identity.id, true).second) {
+            snapshot.enemy_profiles.push_back(enemy_profile(identity.id));
         }
     }
     snapshot.enemy_focus_uid =

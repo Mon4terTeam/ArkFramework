@@ -8,8 +8,15 @@ void LocalBattle::note_timeline_frame(std::uint32_t frame) {
         return;
     }
     auto current = timeline_nodes_.find(timeline_current_id_);
-    if (current == timeline_nodes_.end() || frame <= current->second.end_frame) {
+    if (current == timeline_nodes_.end() ||
+        frame <= current->second.end_frame) {
         return;
+    }
+    for (const auto& [id, child] : timeline_nodes_) {
+        (void)id;
+        if (child.parent_id == current->second.id) {
+            return;
+        }
     }
     current->second.end_frame = frame;
     ++timeline_revision_;
@@ -47,7 +54,9 @@ void LocalBattle::record_timeline_event_locked(std::uint32_t frame,
                                                const std::string& actor,
                                                const std::string& target,
                                                std::uint8_t type,
-                                               double actual) {
+                                               double actual,
+                                               std::uint32_t actor_uid,
+                                               std::uint32_t target_uid) {
     const std::string node_id = timeline_node_for_frame_locked(frame);
     auto node = timeline_nodes_.find(node_id);
     if (node == timeline_nodes_.end()) {
@@ -58,6 +67,8 @@ void LocalBattle::record_timeline_event_locked(std::uint32_t frame,
     event.frame = frame;
     event.actor = actor;
     event.target = target;
+    event.actor_uid = actor_uid;
+    event.target_uid = target_uid;
     event.type = type;
     event.actual = actual;
     values.push_back(std::move(event));

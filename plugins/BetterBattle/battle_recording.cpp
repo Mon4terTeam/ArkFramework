@@ -169,6 +169,26 @@ void normalize_branch_numbers(
     }
 }
 
+void normalize_timeline_ranges(
+    std::map<std::string, ReplayTreeNode>& nodes) {
+    for (auto& [id, node] : nodes) {
+        (void)id;
+        bool has_children = false;
+        std::uint32_t child_fork =
+            std::numeric_limits<std::uint32_t>::max();
+        for (const auto& [child_id, child] : nodes) {
+            (void)child_id;
+            if (child.parent_id == node.id) {
+                has_children = true;
+                child_fork = std::min(child_fork, child.fork_frame);
+            }
+        }
+        if (has_children) {
+            node.end_frame = child_fork;
+        }
+    }
+}
+
 std::int64_t unix_time_ms() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
                std::chrono::system_clock::now().time_since_epoch())
@@ -623,43 +643,179 @@ bool LocalBattle::consume_matching_replay_operation(
 
 void LocalBattle::record_operation(const RecordedOperation& operation,
                                    std::uint32_t frame) {
-    if (replay_branch_armed_.load(std::memory_order_acquire) &&
-        !record_capture_suppressed_ &&
-        !consume_matching_replay_operation(operation, frame)) {
-        fork_replay_for_manual_operation(frame);
+    if (record_capture_suppressed_) {
+        return;
     }
     std::lock_guard lock(record_mutex_);
-    if (!record_active_.load(std::memory_order_acquire) ||
-        record_capture_suppressed_) {
+    if (!record_active_.load(std::memory_order_acquire)) {
         return;
     }
-    std::string target_id = timeline_current_id_;
-    if (!playback_path_.empty()) {
-        const std::string playback_id = playback_node_for_frame_locked(frame);
-        if (!playback_id.empty()) {
-            target_id = playback_id;
+    frame_actual_operations_[frame].push_back(operation);
+}
+
+std::vector<RecordedOperation> LocalBattle::expected_operations_locked(
+    std::uint32_t frame) const {
+    std::vector<RecordedOperation> expected;
+    for (const std::string& id : playback_path_) {
+        const auto node = timeline_nodes_.find(id);
+        if (node == timeline_nodes_.end()) {
+            continue;
+        }
+        const auto operations = node->second.operations.find(frame);
+        if (operations != node->second.operations.end()) {
+            expected.insert(expected.end(), operations->second.begin(),
+                            operations->second.end());
         }
     }
-    const auto current = timeline_nodes_.find(target_id);
-    if (current == timeline_nodes_.end()) {
+    return expected;
+}
+
+bool LocalBattle::operations_equal(
+    std::vector<RecordedOperation> left,
+    std::vector<RecordedOperation> right) const {
+    if (left.size() != right.size()) {
+        return false;
+    }
+    for (const RecordedOperation& operation : right) {
+        const auto match = std::find_if(
+            left.begin(), left.end(),
+            [&](const RecordedOperation& candidate) {
+                return same_recorded_operation(candidate, operation);
+            });
+        if (match == left.end()) {
+            return false;
+        }
+        left.erase(match);
+    }
+    return true;
+}
+
+void LocalBattle::timeline_frame_enter(void* controller,
+                                       std::uint32_t frame) {
+    if (!controller) {
         return;
     }
-    TimelineNode& node = current->second;
-    const std::uint32_t minimum_frame =
-        node.parent_id.empty() ? 0 : node.fork_frame + 1;
-    const std::uint32_t recorded_frame = std::max(frame, minimum_frame);
-    node.operations[recorded_frame].push_back(operation);
-    node.end_frame = std::max(node.end_frame, recorded_frame);
+    if (frame_prepared_ == frame) {
+        return;
+    }
+    frame_prepared_ = frame;
 
-    ++timeline_revision_;
-    record_dirty_.store(true, std::memory_order_release);
-    timeline_dirty_.store(true, std::memory_order_release);
+    std::vector<RecordedOperation> expected;
+    {
+        std::lock_guard lock(record_mutex_);
+        if (frame_policy_ != TimelineFramePolicy::CompareInject) {
+            return;
+        }
+        expected = expected_operations_locked(frame);
+    }
+    if (expected.empty()) {
+        return;
+    }
+
+    std::vector<RecordedOperation> remaining;
+    {
+        std::lock_guard lock(record_mutex_);
+        remaining = frame_actual_operations_[frame];
+    }
+    std::vector<RecordedOperation> injected;
+    try {
+        for (const RecordedOperation& operation : expected) {
+            const auto match = std::find_if(
+                remaining.begin(), remaining.end(),
+                [&](const RecordedOperation& candidate) {
+                    return same_recorded_operation(candidate, operation);
+                });
+            if (match != remaining.end()) {
+                remaining.erase(match);
+                continue;
+            }
+            dispatch_replay_operation(operation);
+            injected.push_back(operation);
+        }
+    } catch (const std::exception& error) {
+        publish_result("参考操作执行失败 F" + std::to_string(frame) +
+                           "：" + error.what(),
+                       false);
+    }
+    if (!injected.empty()) {
+        std::lock_guard lock(record_mutex_);
+        auto& actual = frame_actual_operations_[frame];
+        actual.insert(actual.end(), injected.begin(), injected.end());
+    }
+}
+
+void LocalBattle::timeline_frame_commit(std::uint32_t frame) {
+    if (frame_prepared_ != frame) {
+        return;
+    }
+    frame_prepared_ = std::numeric_limits<std::uint32_t>::max();
+
+    std::vector<RecordedOperation> actual;
+    std::vector<RecordedOperation> expected;
+    TimelineFramePolicy policy = TimelineFramePolicy::Record;
+    {
+        std::lock_guard lock(record_mutex_);
+        const auto actual_it = frame_actual_operations_.find(frame);
+        if (actual_it != frame_actual_operations_.end()) {
+            actual = actual_it->second;
+        }
+        policy = frame_policy_;
+        if (policy != TimelineFramePolicy::Record) {
+            expected = expected_operations_locked(frame);
+        }
+    }
+
+    if (policy == TimelineFramePolicy::Record) {
+        std::lock_guard lock(record_mutex_);
+        const auto current = timeline_nodes_.find(timeline_current_id_);
+        if (current != timeline_nodes_.end()) {
+            bool has_children = false;
+            for (const auto& [id, child] : timeline_nodes_) {
+                (void)id;
+                if (child.parent_id == current->second.id) {
+                    has_children = true;
+                    break;
+                }
+            }
+            if (!has_children) {
+                if (!actual.empty()) {
+                    auto& operations =
+                        current->second.operations[frame];
+                    operations.insert(operations.end(), actual.begin(),
+                                      actual.end());
+                }
+                current->second.end_frame =
+                    std::max(current->second.end_frame, frame);
+                ++timeline_revision_;
+                record_dirty_.store(true, std::memory_order_release);
+                timeline_dirty_.store(true, std::memory_order_release);
+            }
+        }
+        frame_actual_operations_.erase(frame);
+        return;
+    }
+
+    if (!operations_equal(actual, expected)) {
+        {
+            std::lock_guard lock(record_mutex_);
+            frame_actual_operations_[frame] = std::move(actual);
+        }
+        fork_replay_for_manual_operation(frame);
+        return;
+    }
+    std::lock_guard lock(record_mutex_);
+    replay_frame_ = std::max(replay_frame_, frame);
+    replay_dispatched_ +=
+        static_cast<std::uint32_t>(actual.size());
+    replay_next_step_ = 0;
+    while (replay_next_step_ < replay_steps_.size() &&
+           replay_steps_[replay_next_step_].first <= frame) {
+        ++replay_next_step_;
+    }
+    frame_actual_operations_.erase(frame);
 }
 
 void LocalBattle::fork_replay_for_manual_operation(std::uint32_t frame) {
-    if (!replay_branch_armed_.exchange(false, std::memory_order_acq_rel)) {
-        return;
-    }
     replay_active_.store(false, std::memory_order_release);
     replay_stop_frame_.store(0, std::memory_order_release);
     replay_stop_enabled_.store(false, std::memory_order_release);
@@ -676,8 +832,14 @@ void LocalBattle::fork_replay_for_manual_operation(std::uint32_t frame) {
     std::size_t segment_index = 0;
     std::uint32_t parent_fork = 0;
     std::uint32_t parent_end = 0;
+    std::vector<RecordedOperation> actual;
     {
         std::lock_guard lock(record_mutex_);
+        const auto actual_it = frame_actual_operations_.find(frame);
+        if (actual_it != frame_actual_operations_.end()) {
+            actual = actual_it->second;
+        }
+        frame_actual_operations_.clear();
         segment_id = playback_node_for_frame_locked(frame);
         parent_id = playback_fork_parent_locked(frame);
         segment_index = playback_segment_;
@@ -709,8 +871,20 @@ void LocalBattle::fork_replay_for_manual_operation(std::uint32_t frame) {
     pending_timeline_parent_id_ = parent_id;
     pending_timeline_jump_ = true;
     pending_timeline_fast_ = false;
+    pending_timeline_play_ = false;
     pending_timeline_fork_frame_ = fork_frame;
+        frame_policy_ = TimelineFramePolicy::Record;
     complete_timeline_jump(fork_frame, true);
+    if (!actual.empty()) {
+        std::lock_guard lock(record_mutex_);
+        const auto current = timeline_nodes_.find(timeline_current_id_);
+        if (current != timeline_nodes_.end()) {
+            auto& operations = current->second.operations[frame];
+            operations.insert(operations.end(), actual.begin(), actual.end());
+            current->second.end_frame =
+                std::max(current->second.end_frame, frame);
+        }
+    }
     replay_file_.clear();
     replay_steps_.clear();
     reset_replay_consumed();
@@ -951,6 +1125,7 @@ void LocalBattle::begin_timeline_session_from(
             replay_has_world_event_baseline_ =
                 world_event_baseline;
             normalize_branch_numbers(timeline_nodes_);
+            normalize_timeline_ranges(timeline_nodes_);
             timeline_root_id_ = timeline_.pending.tree.root_id;
             timeline_current_id_ = timeline_.pending.tree.current_id;
             std::uint32_t next_node = timeline_next_node_;
@@ -991,9 +1166,12 @@ void LocalBattle::begin_timeline_session_from(
         }
         replay_event_check_valid_ = false;
         replay_event_mismatch_ = false;
+        frame_actual_operations_.clear();
+        frame_prepared_ = std::numeric_limits<std::uint32_t>::max();
+        frame_policy_ = imported ? TimelineFramePolicy::CompareInject
+                                 : TimelineFramePolicy::Record;
         reset_world_sampling();
         record_active_.store(false, std::memory_order_release);
-        replay_branch_armed_.store(imported, std::memory_order_release);
         timeline_record_pending_.store(true, std::memory_order_release);
         record_dirty_.store(true, std::memory_order_release);
         timeline_dirty_.store(true, std::memory_order_release);
@@ -1096,6 +1274,13 @@ bool LocalBattle::prepare_timeline_for_controller(void* controller) {
         }
         if (hooks_ready) {
             record_active_.store(true, std::memory_order_release);
+            try {
+                install_replay_hook();
+            } catch (const std::exception& error) {
+                log(kLogWarning,
+                    std::string("时间轴 FixedUpdate Hook 安装失败：") +
+                        error.what());
+            }
         } else {
             log(kLogWarning, "时间轴录制 Hook 未就绪，仅保留节点元数据");
         }
@@ -1350,21 +1535,13 @@ void LocalBattle::sample_world_events(void* controller,
             world_sampling_wave_start_index_ =
                 std::max(world_sampling_wave_start_index_,
                          world_sampling_wave_);
-            record_timeline_world_event_locked(
-                frame, kWorldEventWave, 1, total_waves);
         }
         if (has_wave_start && wave_start_raw != 0) {
             world_sampling_wave_start_index_ = 1;
             world_sampling_wave_ =
                 std::max(world_sampling_wave_, 1);
-            record_timeline_world_event_locked(
-                frame, kWorldEventWave, 1, total_waves);
         } else if (wave > 0 && frame <= 150) {
             world_sampling_wave_start_index_ = wave;
-            for (int index = 1; index <= wave; ++index) {
-                record_timeline_world_event_locked(
-                    frame, kWorldEventWave, index, total_waves);
-            }
         }
         return;
     }
@@ -1380,8 +1557,6 @@ void LocalBattle::sample_world_events(void* controller,
         world_sampling_wave_ = 1;
         world_sampling_wave_start_index_ =
             std::max(world_sampling_wave_start_index_, 1);
-        record_timeline_world_event_locked(
-            frame, kWorldEventWave, 1, total_waves);
     }
     if (has_wave_start && wave_start_raw != 0 &&
         wave_start_raw != world_sampling_wave_start_) {
@@ -1389,15 +1564,8 @@ void LocalBattle::sample_world_events(void* controller,
         ++world_sampling_wave_start_index_;
         world_sampling_wave_ = std::max(
             world_sampling_wave_, world_sampling_wave_start_index_);
-        record_timeline_world_event_locked(
-            frame, kWorldEventWave, world_sampling_wave_start_index_,
-            total_waves);
     }
     if (wave >= 0) {
-        for (int index = world_sampling_wave_ + 1; index <= wave; ++index) {
-            record_timeline_world_event_locked(frame, kWorldEventWave, index,
-                                               total_waves);
-        }
         world_sampling_wave_ = std::max(world_sampling_wave_, wave);
         world_sampling_total_waves_ = total_waves;
     }
@@ -1415,6 +1583,10 @@ void LocalBattle::verify_replay_events() {
     if (current == 0) {
         return;
     }
+    // World events are sampled approximations (cost/wave timing), not
+    // deterministic combat modifiers. They are recorded for display only and
+    // must not gate replay progress.
+    constexpr bool kVerifyWorldEvents = false;
     const auto normalized_keys = [](const std::vector<ReplayEvent>& values) {
         std::vector<std::string> keys;
         keys.reserve(values.size());
@@ -1430,6 +1602,9 @@ void LocalBattle::verify_replay_events() {
             std::vector<std::string> keys;
             keys.reserve(values.size());
             for (const ReplayWorldEvent& event : values) {
+            if (event.kind == kWorldEventWave) {
+                continue;
+            }
                 keys.push_back(replay_world_event_key(event));
             }
             std::sort(keys.begin(), keys.end());
@@ -1441,6 +1616,9 @@ void LocalBattle::verify_replay_events() {
     std::uint32_t mismatch_frame = 0;
     std::size_t expected_count = 0;
     std::size_t actual_count = 0;
+    std::vector<ReplayEvent> mismatch_actual;
+    std::vector<ReplayWorldEvent> mismatch_actual_world;
+    std::vector<std::string> mismatch_expected;
     {
         std::lock_guard lock(record_mutex_);
         if (!replay_event_check_valid_) {
@@ -1485,14 +1663,23 @@ void LocalBattle::verify_replay_events() {
                 const bool combat_mismatch =
                     replay_has_event_baseline_ && expected != actual;
                 const bool world_mismatch =
-                    replay_has_world_event_baseline_ &&
+                    kVerifyWorldEvents && replay_has_world_event_baseline_ &&
                     expected_world != actual_world;
                 if (combat_mismatch || world_mismatch) {
                     mismatch = true;
                     mismatch_frame = frame;
-                    expected_count =
-                        expected.size() + expected_world.size();
-                    actual_count = actual.size() + actual_world.size();
+                    expected_count = expected.size() +
+                        (kVerifyWorldEvents ? expected_world.size() : 0);
+                    actual_count = actual.size() +
+                        (kVerifyWorldEvents ? actual_world.size() : 0);
+                    if (actual_it != node->second.observed_events.end()) {
+                        mismatch_actual = actual_it->second;
+                    }
+                    if (actual_world_it !=
+                        node->second.observed_world_events.end()) {
+                        mismatch_actual_world = actual_world_it->second;
+                    }
+                    mismatch_expected = expected;
                     break;
                 }
             }
@@ -1513,6 +1700,26 @@ void LocalBattle::verify_replay_events() {
     publish_result("Warning F" + std::to_string(mismatch_frame) +
                    " 帧事件与录像不同（" + detail + "）",
                    false);
+    for (const ReplayEvent& event : mismatch_actual) {
+        log(kLogWarning,
+            "事件差异 F" + std::to_string(mismatch_frame) +
+                " actual actor=" + event.actor + " target=" + event.target +
+                " type=" + std::to_string(static_cast<unsigned>(event.type)) +
+                " value=" + std::to_string(event.actual) +
+                " auid=" + std::to_string(event.actor_uid) +
+                " tuid=" + std::to_string(event.target_uid));
+    }
+    for (const std::string& key : mismatch_expected) {
+        log(kLogWarning, "事件差异 F" + std::to_string(mismatch_frame) +
+                             " expected key=" + key);
+    }
+    for (const ReplayWorldEvent& event : mismatch_actual_world) {
+        log(kLogWarning,
+            "世界事件差异 F" + std::to_string(mismatch_frame) +
+                " actual kind=" + std::to_string(event.kind) +
+                " value=" + std::to_string(event.value) +
+                " total=" + std::to_string(event.total));
+    }
 }
 
 std::vector<std::string> LocalBattle::timeline_path_to_root_locked(
@@ -1682,14 +1889,9 @@ bool LocalBattle::build_timeline_jump_plan(std::uint32_t target,
     RecordedFrameMap plan;
     for (const TimelineNode* node : path) {
         for (const auto& [frame, operations] : node->operations) {
-            if (frame > target) {
-                continue;
-            }
+            (void)target;
             auto& merged = plan[frame];
             merged.insert(merged.end(), operations.begin(), operations.end());
-        }
-        if (node == containing) {
-            break;
         }
     }
     replay_steps_.clear();
@@ -1794,16 +1996,13 @@ bool LocalBattle::run_fast_timeline_jump(void* controller) {
         }
 
         runtime_.set<bool>(game_mode, "m_allowManualTick", false);
-        replay_stop_frame_.store(0, std::memory_order_release);
-        replay_stop_enabled_.store(false, std::memory_order_release);
-        replay_active_.store(false, std::memory_order_release);
-        set_paused(true);
+        const bool auto_play = pending_timeline_play_;
         try {
             adopt_scene(controller);
         } catch (...) {
             clear_scene();
         }
-        complete_timeline_jump(replay_frame_);
+        finish_timeline_rewind(replay_frame_, auto_play);
         return true;
     } catch (const std::exception& error) {
         if (game_mode) {
@@ -1817,6 +2016,7 @@ bool LocalBattle::run_fast_timeline_jump(void* controller) {
         replay_stop_enabled_.store(false, std::memory_order_release);
         pending_timeline_jump_ = false;
         pending_timeline_fast_ = false;
+        pending_timeline_play_ = false;
         pending_timeline_parent_id_.clear();
         pending_timeline_mode_ = PendingTimelineMode::None;
         record_active_.store(false, std::memory_order_release);
@@ -2125,33 +2325,21 @@ void LocalBattle::replay_seek(std::uint32_t target, bool fast,
                         : ("录像已在第 " + std::to_string(current) + " 帧"));
                 return;
             }
-            if (!replay_source_path_.empty()) {
-                start_replay(replay_source_path_, target, fast, node_id);
-            } else {
-                restart_from_plan(node_id);
-            }
+            restart_from_plan(node_id);
             return;
         }
         if (target < current) {
             const std::string node =
                 (!node_id.empty() && node_id != branch_id) ? node_id
                                                            : branch_id;
-            if (!replay_source_path_.empty()) {
-                start_replay(replay_source_path_, target, fast, node);
-            } else {
-                restart_from_plan(node);
-            }
+            timeline_jump(target, node, fast);
             return;
         }
         if (switch_branch) {
             log(kLogInfo, "录像切换分支并快进：selected=" + node_id +
                               " playback=" + branch_id + " target=" +
                               std::to_string(target));
-            if (!replay_source_path_.empty()) {
-                start_replay(replay_source_path_, target, fast, node_id);
-            } else {
-                restart_from_plan(node_id);
-            }
+            restart_from_plan(node_id);
             return;
         }
         const bool keep_branch = !node_id.empty() && node_id != branch_id;
@@ -2197,9 +2385,8 @@ void LocalBattle::replay_seek(std::uint32_t target, bool fast,
 }
 
 void LocalBattle::timeline_jump(std::uint32_t target, const std::string& node_id,
-                                bool fast) {
+                                bool fast, bool auto_play) {
     cancel_timeline_fast_forward();
-    replay_branch_armed_.store(false, std::memory_order_release);
     pending_replay_seek_fast_.store(false, std::memory_order_release);
     pending_replay_seek_target_.store(0, std::memory_order_release);
     std::uint32_t current_frame = 0;
@@ -2216,6 +2403,18 @@ void LocalBattle::timeline_jump(std::uint32_t target, const std::string& node_id
     if (!build_timeline_jump_plan(target, node_id, &parent_id)) {
         publish_result("找不到要回退的时间轴节点", false);
         return;
+    }
+    {
+        std::lock_guard lock(record_mutex_);
+        std::string selected = node_id;
+        if (selected.empty()) {
+            selected = !playback_path_.empty() ? playback_path_.back()
+                                               : timeline_current_id_;
+        }
+        if (!selected.empty() &&
+            timeline_nodes_.find(selected) != timeline_nodes_.end()) {
+            set_playback_path_locked(selected);
+        }
     }
     if (replay_file_.rfind("timeline://", 0) != 0) {
         publish_result("无法建立时间轴回放前缀", false);
@@ -2291,9 +2490,17 @@ void LocalBattle::timeline_jump(std::uint32_t target, const std::string& node_id
 
     pending_timeline_jump_ = true;
     pending_timeline_fast_ = fast;
+    pending_timeline_play_ = auto_play;
     pending_timeline_parent_id_ = parent_id;
     pending_timeline_fork_frame_ = target;
     pending_timeline_mode_ = PendingTimelineMode::Jump;
+    {
+        std::lock_guard lock(record_mutex_);
+        frame_actual_operations_.clear();
+        frame_prepared_ =
+            std::numeric_limits<std::uint32_t>::max();
+        frame_policy_ = TimelineFramePolicy::CompareInject;
+    }
     record_active_.store(false, std::memory_order_release);
     tas_spine_auto_.store(true, std::memory_order_release);
     replay_next_step_ = 0;
@@ -2334,15 +2541,22 @@ void LocalBattle::timeline_jump(std::uint32_t target, const std::string& node_id
             throw std::runtime_error("重建战斗失败");
         }
         replay_stop_frame_.store(target, std::memory_order_release);
-        replay_stop_enabled_.store(true, std::memory_order_release);
+        replay_stop_enabled_.store(!auto_play, std::memory_order_release);
         replay_active_.store(true, std::memory_order_release);
+        if (!auto_play) {
+            record_active_.store(false, std::memory_order_release);
+        }
         set_paused(false);
         publish_result("时间轴" + std::string(fast ? "快速(beta) " : "") +
-                       "回退中：目标帧 " + std::to_string(target) +
-                       "，到达后将暂停并创建空白分支");
+                       (auto_play ? "回退并播放中：目标帧 "
+                                  : "回退中：目标帧 ") +
+                       std::to_string(target) +
+                       (auto_play ? "，到达后继续播放原录像"
+                                  : "，到达后交由玩家继续"));
     } catch (const std::exception& error) {
         pending_timeline_jump_ = false;
         pending_timeline_fast_ = false;
+        pending_timeline_play_ = false;
         pending_timeline_parent_id_.clear();
         replay_active_.store(false, std::memory_order_release);
         replay_stop_frame_.store(0, std::memory_order_release);
@@ -2487,6 +2701,54 @@ void LocalBattle::cancel_timeline_fast_forward() {
     timeline_advance_frames_.store(0, std::memory_order_release);
 }
 
+void LocalBattle::finish_timeline_rewind(std::uint32_t frame,
+                                         bool auto_play) {
+    cancel_timeline_fast_forward();
+    {
+        std::lock_guard lock(record_mutex_);
+        const std::string selected =
+            !playback_path_.empty()
+                ? playback_path_.back()
+                : (pending_timeline_parent_id_.empty()
+                       ? timeline_current_id_
+                       : pending_timeline_parent_id_);
+        if (!selected.empty() &&
+            timeline_nodes_.find(selected) != timeline_nodes_.end()) {
+            set_playback_path_locked(selected);
+            advance_playback_segment_locked(frame);
+            timeline_current_id_ = playback_path_.back();
+        }
+        timeline_.replay_plan = replay_steps_;
+        frame_actual_operations_.clear();
+        frame_prepared_ =
+            std::numeric_limits<std::uint32_t>::max();
+        frame_policy_ = auto_play ? TimelineFramePolicy::CompareInject
+                                  : TimelineFramePolicy::CompareOnly;
+        pending_timeline_jump_ = false;
+        pending_timeline_fast_ = false;
+        pending_timeline_play_ = false;
+        pending_timeline_parent_id_.clear();
+        pending_timeline_mode_ = PendingTimelineMode::None;
+        record_active_.store(true, std::memory_order_release);
+        record_capture_suppressed_ = false;
+        ++timeline_revision_;
+        timeline_dirty_.store(true, std::memory_order_release);
+    }
+    replay_stop_frame_.store(0, std::memory_order_release);
+    replay_stop_enabled_.store(false, std::memory_order_release);
+    if (auto_play) {
+        replay_active_.store(true, std::memory_order_release);
+        set_paused(false);
+    } else {
+        replay_active_.store(false, std::memory_order_release);
+        set_paused(true);
+    }
+    publish_timeline();
+    publish_result("已回退到第 " + std::to_string(frame) + " 帧；" +
+                   (auto_play ? "继续播放原录像，玩家操作不一致时分裂"
+                              : "不执行原录像操作，等待玩家继续"));
+}
+
 void LocalBattle::complete_timeline_jump(std::uint32_t frame,
                                          bool from_replay) {
     cancel_timeline_fast_forward();
@@ -2497,6 +2759,7 @@ void LocalBattle::complete_timeline_jump(std::uint32_t frame,
         if (parent == timeline_nodes_.end()) {
             pending_timeline_jump_ = false;
             pending_timeline_fast_ = false;
+            pending_timeline_play_ = false;
             pending_timeline_parent_id_.clear();
             return;
         }
@@ -2590,14 +2853,16 @@ void LocalBattle::complete_timeline_jump(std::uint32_t frame,
             !future_expected_events.empty() || !future_world_events.empty() ||
             !future_expected_world_events.empty();
         std::vector<std::string> reparent_children;
-        std::uint32_t last_child_fork = 0;
+        std::uint32_t child_fork_boundary =
+            std::numeric_limits<std::uint32_t>::max();
         for (const std::string& child_id : old_children) {
             const auto child = timeline_nodes_.find(child_id);
             if (child != timeline_nodes_.end() &&
                 child->second.fork_frame > target) {
                 reparent_children.push_back(child_id);
-                last_child_fork =
-                    std::max(last_child_fork, child->second.fork_frame);
+                child_fork_boundary =
+                    std::min(child_fork_boundary,
+                             child->second.fork_frame);
             }
         }
         const bool continuation_needed =
@@ -2608,7 +2873,8 @@ void LocalBattle::complete_timeline_jump(std::uint32_t frame,
             continuation.id = "n" + std::to_string(timeline_next_node_++);
             continuation.parent_id = node.id;
             continuation.fork_frame = target;
-            continuation.end_frame = std::max(old_end, last_child_fork);
+            continuation.end_frame =
+                reparent_children.empty() ? old_end : child_fork_boundary;
             continuation.branch_no = timeline_next_branch_++;
             continuation.operations = std::move(future);
             continuation.observed_events = std::move(future_events);
@@ -2652,6 +2918,7 @@ void LocalBattle::complete_timeline_jump(std::uint32_t frame,
         timeline_source_file_.clear();
         pending_timeline_jump_ = false;
         pending_timeline_fast_ = false;
+        pending_timeline_play_ = false;
         pending_timeline_parent_id_.clear();
         pending_timeline_mode_ = PendingTimelineMode::None;
         record_active_.store(true, std::memory_order_release);
@@ -2682,17 +2949,140 @@ void LocalBattle::complete_timeline_jump(std::uint32_t frame,
     }
 }
 
+void LocalBattle::switch_timeline_branch(const std::string& node_id) {
+    if (node_id.empty() || replay_file_.empty() ||
+        !replay_frame_get_ || !replay_frame_method_) {
+        return;
+    }
+    std::uint32_t current = 0;
+    try {
+        current = replay_frame_get_(replay_frame_method_);
+    } catch (...) {
+        return;
+    }
+
+    bool switched = false;
+    {
+        std::lock_guard lock(record_mutex_);
+        if (playback_path_.empty() ||
+            timeline_nodes_.find(node_id) == timeline_nodes_.end()) {
+            return;
+        }
+        std::vector<std::string> active =
+            timeline_path_to_root_locked(playback_path_.back());
+        std::vector<std::string> target =
+            timeline_path_to_root_locked(node_id);
+        const std::string playback_node =
+            playback_node_for_frame_locked(current);
+        std::vector<std::string> base =
+            timeline_path_to_root_locked(playback_node);
+        if (active.empty() || target.empty() || base.empty() ||
+            base.size() > target.size() ||
+            !std::equal(base.begin(), base.end(), target.begin())) {
+            return;
+        }
+
+        bool on_active_path = target.size() <= active.size() &&
+            std::equal(target.begin(), target.end(), active.begin());
+        if (on_active_path) {
+            return;
+        }
+
+        std::size_t common = 0;
+        while (common < active.size() && common < target.size() &&
+               active[common] == target[common]) {
+            ++common;
+        }
+        if (common == 0 || common >= target.size()) {
+            return;
+        }
+        std::uint32_t shared_fork =
+            std::numeric_limits<std::uint32_t>::max();
+        if (common < active.size()) {
+            const auto current_child =
+                timeline_nodes_.find(active[common]);
+            const auto target_child =
+                timeline_nodes_.find(target[common]);
+            if (current_child == timeline_nodes_.end() ||
+                target_child == timeline_nodes_.end()) {
+                return;
+            }
+            shared_fork =
+                std::min(current_child->second.fork_frame,
+                         target_child->second.fork_frame);
+        } else {
+            const auto target_child =
+                timeline_nodes_.find(target[common]);
+            if (target_child == timeline_nodes_.end()) {
+                return;
+            }
+            shared_fork = target_child->second.fork_frame;
+        }
+        if (current > shared_fork) {
+            return;
+        }
+
+        std::vector<std::pair<std::uint32_t,
+                              std::vector<RecordedOperation>>>
+            target_plan;
+        if (!build_plan_for_nodes_path_locked(node_id, &target_plan)) {
+            return;
+        }
+        replay_steps_ = std::move(target_plan);
+        reset_replay_consumed();
+        replay_next_step_ = 0;
+        replay_dispatched_ = 0;
+        while (replay_next_step_ < replay_steps_.size() &&
+               replay_steps_[replay_next_step_].first <= current) {
+            replay_dispatched_ +=
+                static_cast<std::uint32_t>(
+                    replay_steps_[replay_next_step_].second.size());
+            ++replay_next_step_;
+        }
+        replay_frame_ = current;
+        timeline_.replay_plan = replay_steps_;
+        timeline_current_id_ = node_id;
+        set_playback_path_locked(node_id);
+        advance_playback_segment_locked(current);
+        replay_stop_frame_.store(0, std::memory_order_release);
+        replay_stop_enabled_.store(false, std::memory_order_release);
+        pending_timeline_jump_ = false;
+        pending_timeline_fast_ = false;
+        pending_timeline_play_ = false;
+        pending_timeline_parent_id_.clear();
+        frame_actual_operations_.clear();
+        frame_prepared_ =
+            std::numeric_limits<std::uint32_t>::max();
+        frame_policy_ = TimelineFramePolicy::CompareInject;
+        record_active_.store(true, std::memory_order_release);
+        record_capture_suppressed_ = false;
+        replay_active_.store(true, std::memory_order_release);
+        ++timeline_revision_;
+        timeline_dirty_.store(true, std::memory_order_release);
+        switched = true;
+    }
+    if (switched) {
+        publish_timeline();
+        publish_result("已切换后续播放分支：" + node_id);
+    }
+}
+
 void LocalBattle::timeline_action(const std::string& action,
                                   const std::string& name,
-                                  const std::string& label, int value) {
+                                  const std::string& label, int value,
+                                  bool auto_play) {
     if (action == "jump") {
         timeline_jump(static_cast<std::uint32_t>(std::max(value, 0)), name,
-                      label == "fast");
+                      label == "fast", auto_play);
         return;
     }
     if (action == "advance") {
         timeline_fast_forward(
             static_cast<std::uint32_t>(std::max(value, 0)));
+        return;
+    }
+    if (action == "branch") {
+        switch_timeline_branch(name);
         return;
     }
     if (action == "status") {
@@ -2871,6 +3261,8 @@ std::string LocalBattle::build_timeline_json_locked() {
                     {"node_id", node_id},
                     {"actor", hit.actor},
                     {"target", hit.target},
+                    {"actor_uid", hit.actor_uid},
+                    {"target_uid", hit.target_uid},
                     {"type", static_cast<unsigned>(hit.type)},
                     {"value", hit.actual},
                 });
@@ -3132,6 +3524,7 @@ void LocalBattle::start_replay_plan(
     try {
         cancel_timeline_fast_forward();
         clear_enemy_focus();
+        battle_session_closed_.store(false, std::memory_order_release);
         if (meta.stage_id.empty() || meta.start.stage.empty() ||
             meta.start.squad.empty()) {
             throw std::runtime_error("录像 meta 缺少关卡或编队");
@@ -3167,6 +3560,10 @@ void LocalBattle::start_replay_plan(
         {
             std::lock_guard lock(record_mutex_);
             timeline_.replay_plan = plan;
+            frame_actual_operations_.clear();
+            frame_prepared_ =
+                std::numeric_limits<std::uint32_t>::max();
+            frame_policy_ = TimelineFramePolicy::CompareInject;
         }
         replay_steps_ = std::move(plan);
         reset_replay_consumed();
@@ -3180,6 +3577,10 @@ void LocalBattle::start_replay_plan(
                                             std::memory_order_release);
             pending_replay_seek_target_.store(seek_target,
                                               std::memory_order_release);
+        } else if (!replay_steps_.empty()) {
+            replay_stop_frame_.store(
+                replay_steps_.back().first, std::memory_order_release);
+            replay_stop_enabled_.store(true, std::memory_order_release);
         }
         queue_timeline_start(PendingTimelineMode::ImportedReplay, start,
                              meta.stage_id, meta.seed, replay_file_);
@@ -3206,7 +3607,7 @@ void LocalBattle::start_replay_plan(
             timeline_waiting_for_controller_ = true;
             pending_playback_branch_id_ = origin_node;
         }
-        record_active_.store(false, std::memory_order_release);
+        record_active_.store(true, std::memory_order_release);
         replay_active_.store(true, std::memory_order_release);
         if (meta.rogue) {
             rogue_start(start);
@@ -3419,52 +3820,6 @@ void LocalBattle::dispatch_replay_operation(const RecordedOperation& operation) 
     }
 }
 
-void LocalBattle::replay_fixed_before() {
-    if (!replay_active_.load(std::memory_order_acquire) || !replay_frame_get_) {
-        return;
-    }
-    replay_frame_ = replay_frame_get_(replay_frame_method_);
-    {
-        std::lock_guard lock(record_mutex_);
-        advance_playback_segment_locked(replay_frame_);
-    }
-    while (replay_active_.load(std::memory_order_acquire) &&
-           replay_next_step_ < replay_steps_.size()) {
-        const auto& step = replay_steps_[replay_next_step_];
-        if (step.first > replay_frame_) {
-            break;
-        }
-        if (step.first < replay_frame_) {
-            log(kLogWarning, "录像回放迟到 " + std::to_string(replay_frame_ - step.first) +
-                                 " 帧：目标 " + std::to_string(step.first) +
-                                 "，当前 " + std::to_string(replay_frame_));
-        }
-        try {
-            for (std::size_t op_index = 0; op_index < step.second.size();
-                 ++op_index) {
-                if (replay_operation_consumed(replay_next_step_, op_index)) {
-                    continue;
-                }
-                dispatch_replay_operation(step.second[op_index]);
-                ++replay_dispatched_;
-            }
-            ++replay_next_step_;
-        } catch (const std::exception& error) {
-            replay_active_.store(false, std::memory_order_release);
-            publish_result("录像回放在第 " + std::to_string(step.first) +
-                               " 帧失败：" + error.what(),
-                           false);
-            return;
-        }
-    }
-    if (replay_next_step_ >= replay_steps_.size() &&
-        !replay_stop_enabled_.load(std::memory_order_acquire)) {
-        replay_active_.store(false, std::memory_order_release);
-        publish_result("录像回放完成，已执行 " + std::to_string(replay_dispatched_) +
-                       " 个操作，最后帧 " + std::to_string(replay_frame_));
-    }
-}
-
 void LocalBattle::on_battle_fixed_update(void* self, void* method) {
     LocalBattle* owner = fixed_observer_owner.load(std::memory_order_acquire);
     if (!owner) {
@@ -3548,8 +3903,7 @@ void LocalBattle::on_replay_fixed_update(void* self, void* method) {
         }
         return;
     }
-    if (owner && owner->replay_active_.load(std::memory_order_acquire)) {
-        if (owner->timeline_waiting_for_controller_) {
+    if (owner->timeline_waiting_for_controller_) {
         if (owner->timeline_stale_controller_ &&
             self == owner->timeline_stale_controller_ &&
             owner->scene_.revision ==
@@ -3566,94 +3920,110 @@ void LocalBattle::on_replay_fixed_update(void* self, void* method) {
                 return;
             }
             owner->timeline_waiting_for_controller_ = false;
+    }
+    if (!self) {
+        if (original) {
+            original(self, method);
         }
-        owner->prepare_timeline_for_controller(self);
-        if (owner->pending_replay_seek_fast_.load(
-                std::memory_order_acquire)) {
-            int state = -1;
-            try {
-                state = method_int(owner->runtime_, self,
-                                   owner->classes_.battle_controller,
-                                   "get_state", -1);
-            } catch (...) {
-                state = -1;
-            }
-            if (state < 2) {
-                if (original) {
-                    original(self, method);
-                }
-                return;
-            }
-        }
-        if (owner->pending_replay_seek_fast_.exchange(
-                false, std::memory_order_acq_rel)) {
-            const std::uint32_t target =
-                owner->pending_replay_seek_target_.exchange(
-                    0, std::memory_order_acq_rel);
-            owner->run_fast_replay_seek(self, target);
-            return;
-        }
-        if (owner->pending_timeline_fast_) {
-            bool seed_ready = false;
-            {
-                std::lock_guard lock(owner->record_mutex_);
-                seed_ready = owner->timeline_seed_apply_done_;
-            }
-            if (!seed_ready) {
-                if (original) {
-                    original(self, method);
-                }
-                return;
-            }
-            owner->run_fast_timeline_jump(self);
-            return;
-        }
+        return;
+    }
+    owner->prepare_timeline_for_controller(self);
+
+    if (owner->pending_replay_seek_fast_.load(std::memory_order_acquire)) {
+        int state = -1;
         try {
-            owner->replay_fixed_before();
+            state = method_int(owner->runtime_, self,
+                               owner->classes_.battle_controller,
+                               "get_state", -1);
         } catch (...) {
+            state = -1;
         }
-        if (!owner->replay_active_.load(std::memory_order_acquire)) {
-            if (owner->pending_timeline_jump_) {
-                owner->pending_timeline_jump_ = false;
-                owner->pending_timeline_fast_ = false;
-                owner->pending_timeline_parent_id_.clear();
-                owner->replay_stop_frame_.store(0, std::memory_order_release);
-                owner->replay_stop_enabled_.store(false,
-                                                  std::memory_order_release);
+        if (state < 2) {
+            if (original) {
+                original(self, method);
             }
-        }
-        const bool stop_enabled =
-            owner->replay_stop_enabled_.load(std::memory_order_acquire);
-        const std::uint32_t stop_frame =
-            owner->replay_stop_frame_.load(std::memory_order_acquire);
-        if (stop_enabled &&
-            owner->replay_active_.load(std::memory_order_acquire) &&
-            owner->replay_frame_get_) {
-            const std::uint32_t frame =
-                owner->replay_frame_get_(owner->replay_frame_method_);
-            if (frame >= stop_frame) {
-                owner->replay_stop_frame_.store(0, std::memory_order_release);
-                owner->replay_stop_enabled_.store(false,
-                                                  std::memory_order_release);
-                owner->replay_active_.store(false, std::memory_order_release);
-                owner->set_paused(true);
-                try {
-                    owner->adopt_scene(self);
-                } catch (...) {
-                    owner->clear_scene();
-                }
-                if (owner->pending_timeline_jump_) {
-                    owner->complete_timeline_jump(frame);
-                } else {
-                    owner->publish_result(
-                        "录像停靠在第 " + std::to_string(frame) + " 帧");
-                }
-                return;
-            }
+            return;
         }
     }
+    if (owner->pending_replay_seek_fast_.exchange(
+            false, std::memory_order_acq_rel)) {
+        const std::uint32_t target =
+            owner->pending_replay_seek_target_.exchange(
+                0, std::memory_order_acq_rel);
+        owner->run_fast_replay_seek(self, target);
+        return;
+    }
+    if (owner->pending_timeline_fast_) {
+        bool seed_ready = false;
+        {
+            std::lock_guard lock(owner->record_mutex_);
+            seed_ready = owner->timeline_seed_apply_done_;
+        }
+        if (!seed_ready) {
+            if (original) {
+                original(self, method);
+            }
+            return;
+        }
+        owner->run_fast_timeline_jump(self);
+        return;
+    }
+
+    std::uint32_t before = 0;
+    try {
+        before = owner->replay_frame_get_
+                     ? owner->replay_frame_get_(owner->replay_frame_method_)
+                     : 0;
+    } catch (...) {
+        before = 0;
+    }
+    owner->timeline_frame_enter(self, before);
     if (original) {
         original(self, method);
+    }
+    std::uint32_t after = before;
+    try {
+        after = owner->replay_frame_get_
+                    ? owner->replay_frame_get_(owner->replay_frame_method_)
+                    : before;
+    } catch (...) {
+        after = before;
+    }
+    if (after > before) {
+        for (std::uint32_t frame = before; frame < after; ++frame) {
+            owner->timeline_frame_commit(frame);
+        }
+    }
+
+    const bool stop_enabled =
+        owner->replay_stop_enabled_.load(std::memory_order_acquire);
+    const std::uint32_t stop_frame =
+        owner->replay_stop_frame_.load(std::memory_order_acquire);
+    if (stop_enabled && after > stop_frame) {
+        owner->replay_frame_ = std::min(after, stop_frame);
+        owner->replay_stop_frame_.store(0, std::memory_order_release);
+        owner->replay_stop_enabled_.store(false,
+                                          std::memory_order_release);
+        try {
+            owner->adopt_scene(self);
+        } catch (...) {
+            owner->clear_scene();
+        }
+        if (owner->pending_timeline_jump_) {
+            owner->finish_timeline_rewind(
+                stop_frame, owner->pending_timeline_play_);
+        } else {
+            owner->replay_active_.store(false, std::memory_order_release);
+            owner->set_paused(true);
+            owner->publish_result(
+                "录像停靠在第 " + std::to_string(stop_frame) + " 帧");
+        }
+        return;
+    }
+    try {
+        owner->adopt_scene(self);
+    } catch (...) {
+        owner->clear_scene();
     }
 }
 

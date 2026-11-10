@@ -228,6 +228,38 @@
   pointer-events: none;
 }
 
+.tas-connector {
+  pointer-events: none;
+}
+
+.tas-connector-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 12;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.tas-connector-line {
+  fill: none;
+  stroke: var(--branch-color);
+  stroke-opacity: 0.68;
+  stroke-width: 1.35;
+  pointer-events: none;
+}
+
+.tas-connector-line.is-straight {
+  stroke-opacity: 0.48;
+  stroke-width: 1;
+}
+
+.tas-connector:hover .tas-connector-line,
+.tas-connector.is-selected .tas-connector-line {
+  stroke-opacity: 1;
+  stroke-width: 3;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--branch-color) 70%, transparent));
+}
+
 .tas-tree-nodes {
   position: absolute;
   z-index: 4;
@@ -557,6 +589,39 @@
   padding: 2px 4px;
   background: var(--accent);
   color: var(--accent-ink);
+  font: 700 10px/1 var(--font-mono);
+  white-space: nowrap;
+}
+
+.tas-game-cursor {
+  position: absolute;
+  z-index: 7;
+  left: 0;
+  width: 1px;
+  background: rgba(155, 217, 255, 0.82);
+  box-shadow: 0 0 5px rgba(155, 217, 255, 0.22);
+  pointer-events: none;
+}
+
+.tas-game-cursor::before {
+  position: absolute;
+  top: 0;
+  left: -4px;
+  width: 9px;
+  height: 6px;
+  background: rgba(155, 217, 255, 0.92);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  content: "";
+}
+
+.tas-game-cursor span {
+  position: absolute;
+  top: 7px;
+  left: 6px;
+  padding: 2px 4px;
+  border: 1px solid rgba(155, 217, 255, 0.38);
+  background: rgba(28, 38, 44, 0.82);
+  color: rgba(205, 235, 255, 0.95);
   font: 700 10px/1 var(--font-mono);
   white-space: nowrap;
 }

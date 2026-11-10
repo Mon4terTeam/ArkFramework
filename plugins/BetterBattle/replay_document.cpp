@@ -374,6 +374,8 @@ std::map<std::uint32_t, std::vector<ReplayEvent>> parse_events(const Json& value
                                   "events.frame");
         event.actor = optional_string(item, "actor", event.actor);
         event.target = optional_string(item, "target", event.target);
+        optional_number(item, "actor_uid", event.actor_uid);
+        optional_number(item, "target_uid", event.target_uid);
         const int type = require_value(item, "type", "events.type").get<int>();
         if (type < 0 || type > 255) {
             throw std::runtime_error("events.type 越界");
@@ -540,17 +542,31 @@ std::vector<std::pair<std::uint32_t, std::vector<RecordedOperation>>> build_plan
 
 void append_replay_events(std::vector<ReplayEvent>& target,
                           const std::vector<ReplayEvent>& source) {
-    std::unordered_map<std::string, int> counts;
-    for (const ReplayEvent& event : target) {
-        ++counts[replay_event_key(event)];
+    std::unordered_map<std::string, std::vector<std::size_t>> slots;
+    for (std::size_t index = 0; index < target.size(); ++index) {
+        slots[replay_event_key(target[index])].push_back(index);
     }
     std::unordered_map<std::string, int> seen;
     for (const ReplayEvent& event : source) {
         const std::string key = replay_event_key(event);
-        if (++seen[key] > counts[key]) {
-            target.push_back(event);
-            ++counts[key];
+        const int ordinal = seen[key]++;
+        const auto slot = slots.find(key);
+        if (slot != slots.end() &&
+            static_cast<std::size_t>(ordinal) < slot->second.size()) {
+            // Older recordings do not carry runtime UIDs. When the live replay
+            // reproduces the same event, fill the identity into the
+            // already-present row so the timeline can show the exact serial.
+            ReplayEvent& existing = target[slot->second[ordinal]];
+            if (!existing.actor_uid) {
+                existing.actor_uid = event.actor_uid;
+            }
+            if (!existing.target_uid) {
+                existing.target_uid = event.target_uid;
+            }
+            continue;
         }
+        target.push_back(event);
+        slots[key].push_back(target.size() - 1);
     }
 }
 
@@ -785,6 +801,8 @@ Json nodes_to_json(const std::vector<ReplayTreeNode>& nodes, bool include_events
                         {"frame", frame},
                         {"actor", event.actor},
                         {"target", event.target},
+                        {"actor_uid", event.actor_uid},
+                        {"target_uid", event.target_uid},
                         {"type", static_cast<unsigned>(event.type)},
                         {"actual", event.actual},
                     });

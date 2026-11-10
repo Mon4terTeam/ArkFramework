@@ -135,7 +135,8 @@ void LocalBattle::poll_battle_events() {
                     std::lock_guard lock(record_mutex_);
                     record_timeline_event_locked(
                         event.frame, event.target_id, event.target_id,
-                        kReplayEventRegen, regen);
+                        kReplayEventRegen, regen, event.target_uid,
+                        event.target_uid);
                 }
                 ++damage_tracker_.revision;
                 sync_frame_track(event.frame);
@@ -143,12 +144,16 @@ void LocalBattle::poll_battle_events() {
             }
 
             std::string actor_id;
+            std::uint32_t actor_uid = 0;
             if (!event.source_owner_id.empty()) {
                 actor_id = event.source_owner_id;
+                actor_uid = event.source_uid;
             } else if (!event.source_id.empty()) {
                 actor_id = event.source_id;
+                actor_uid = event.source_uid;
             } else if (!event.original_source_id.empty()) {
                 actor_id = event.original_source_id;
+                actor_uid = event.original_source_uid;
             } else if (event.kind != ArkBattleEventKind::Healing) {
                 actor_id = kNoSourceActorId;
             }
@@ -205,7 +210,7 @@ void LocalBattle::poll_battle_events() {
                     std::lock_guard lock(record_mutex_);
                     record_timeline_event_locked(
                         event.frame, actor_id, event.target_id, kReplayEventHeal,
-                        healing);
+                        healing, actor_uid, event.target_uid);
                 }
                 ++damage_tracker_.revision;
                 sync_frame_track(event.frame);
@@ -251,7 +256,8 @@ void LocalBattle::poll_battle_events() {
                         std::lock_guard lock(record_mutex_);
                         record_timeline_event_locked(
                             event.frame, actor_id, event.target_id,
-                            kReplayEventTaken, taken);
+                            kReplayEventTaken, taken, actor_uid,
+                            event.target_uid);
                     }
                     ++damage_tracker_.revision;
                     sync_frame_track(event.frame);
@@ -267,7 +273,8 @@ void LocalBattle::poll_battle_events() {
                 std::lock_guard lock(record_mutex_);
                 record_timeline_event_locked(
                     event.frame, actor_id, event.target_id,
-                    static_cast<std::uint8_t>(type), actual);
+                    static_cast<std::uint8_t>(type), actual, actor_uid,
+                    event.target_uid);
             }
             actor.actual += actual;
             actor.calculated += calculated;
@@ -869,6 +876,7 @@ void LocalBattle::start_battle(const BattleStart& start) {
         finish_bypassed_ = false;
         finish_home_pending_.store(false, std::memory_order_release);
         local_battle_active_.store(true, std::memory_order_release);
+        battle_session_closed_.store(false, std::memory_order_release);
         activate_pending_timeline();
         clear_static_cache();
         perf_ = PerfStats{};

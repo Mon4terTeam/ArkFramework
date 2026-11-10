@@ -29,6 +29,7 @@ bool LocalBattle::adopt_scene(void* controller) {
     card_roots_.clear();
     enemy_scene_revision_ = std::numeric_limits<std::uint64_t>::max();
     enemy_serials_.clear();
+    enemy_identity_ids_.clear();
     next_enemy_serial_ = 1;
     enemy_wave_plan_source_ = nullptr;
     enemy_wave_plan_cached_ = false;
@@ -91,6 +92,7 @@ void LocalBattle::clear_scene() {
     focused_renderers_.clear();
     focused_materials_.clear();
     enemy_serials_.clear();
+    enemy_identity_ids_.clear();
     next_enemy_serial_ = 1;
     enemy_scene_revision_ = std::numeric_limits<std::uint64_t>::max();
     enemy_wave_plan_source_ = nullptr;

@@ -39,9 +39,12 @@
     traceStart: (fields) => `trace start ${fields}`,
     traceStop: () => "trace stop",
     timelineStatus: () => "timeline status",
-    timelineJump: (frame, nodeId = "", fast = false) =>
-      `timeline jump ${frame}${nodeId ? ` ${nodeId}` : ""}${fast ? " fast" : ""}`,
+    timelineJump: (frame, nodeId = "", fast = false, play = false) => {
+      const mode = fast ? "fast" : "normal";
+      return `timeline jump ${frame}${nodeId ? ` ${nodeId}` : ""} ${mode}${play ? " play" : ""}`;
+    },
     timelineAdvance: (frames) => `timeline advance ${frames}`,
+    timelineBranch: (nodeId) => `timeline branch ${nodeId}`,
     timelineRename: (nodeId, name) => `timeline rename ${nodeId} ${name}`,
     timelineDelete: (nodeId) => `timeline delete ${nodeId}`,
     replayStart: (path) => `replay start ${quotePath(path)}`,
