@@ -260,6 +260,23 @@ if ($Target -ne 'Tests') {
         @(Get-Sources 'plugins\common'))
     New-SharedLibrary (Join-Path $PluginDirectory 'damage_meter.dll') $damageMeterObjects @(
         $ImGuiImportLibrary, '-luser32')
+
+    $betterBattleObjects = Invoke-CompileAll (@(Get-Sources 'plugins\BetterBattle') +
+        @(Get-Sources 'plugins\common'))
+    New-SharedLibrary (Join-Path $PluginDirectory 'BetterBattle.dll') $betterBattleObjects @(
+        $ImGuiImportLibrary, '-luser32')
+
+    $webBridgeObjects = Invoke-CompileAll @(Get-Sources 'plugins\web_bridge')
+    New-SharedLibrary (Join-Path $PluginDirectory 'web_bridge.dll') $webBridgeObjects @(
+        $ImGuiImportLibrary, '-luser32')
+
+    $dotnet = Get-Command dotnet -ErrorAction SilentlyContinue
+    if ($dotnet) {
+        $webProject = Join-Path $Root 'webview\BetterBattleWeb.csproj'
+        $webOutput = Join-Path $Dist 'BetterBattleWeb'
+        & $dotnet.Source publish $webProject -c Release -r win-x64 --self-contained false `
+            -o $webOutput
+    }
 }
 
 $LocalBuild = Join-Path $Root 'build.local.ps1'

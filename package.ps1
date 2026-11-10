@@ -45,6 +45,8 @@ $Files = [ordered]@{
     'ArkImGui.dll'             = Join-Path $Dist 'ArkImGui.dll'
     'ArkBootstrap.dll'         = Join-Path $Dist 'ArkBootstrap.dll'
     'plugins\damage_meter.dll' = Join-Path $Dist 'plugins\damage_meter.dll'
+    'plugins\BetterBattle.dll' = Join-Path $Dist 'plugins\BetterBattle.dll'
+    'plugins\web_bridge.dll'   = Join-Path $Dist 'plugins\web_bridge.dll'
     'LICENSE'                  = Join-Path $Root 'LICENSE'
     'licenses\Dear-ImGui.txt'  = Join-Path $Root 'third_party\imgui-1.91.9b\LICENSE.txt'
     'licenses\MinHook.txt'     = Join-Path $Root 'third_party\minhook-1.3.4\LICENSE.txt'
@@ -54,6 +56,11 @@ foreach ($entry in $Files.GetEnumerator()) {
         throw "Missing package input: $($entry.Value)"
     }
     Copy-Item -LiteralPath $entry.Value -Destination (Join-Path $Release $entry.Key)
+}
+
+$WebSource = Join-Path $Dist 'BetterBattleWeb'
+if (Test-Path -LiteralPath $WebSource) {
+    Copy-Item -LiteralPath $WebSource -Destination (Join-Path $Release 'BetterBattleWeb') -Recurse
 }
 
 Write-Output "Release ready: $Release"

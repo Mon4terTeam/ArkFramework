@@ -45,13 +45,15 @@ list(REMOVE_ITEM ARK_PLUGIN_RUNTIME_SOURCES ${ARK_CORE_ENTRY_SOURCES} ${ARK_NATI
 file(GLOB ARK_LOADER_SOURCES CONFIGURE_DEPENDS src/loader/*.cpp)
 file(GLOB ARK_BOOTSTRAP_SOURCES CONFIGURE_DEPENDS src/bootstrap/*.c)
 file(GLOB ARK_DAMAGE_METER_SOURCES CONFIGURE_DEPENDS plugins/damage_meter/*.cpp plugins/common/*.cpp)
+file(GLOB ARK_BETTER_BATTLE_SOURCES CONFIGURE_DEPENDS plugins/BetterBattle/*.cpp plugins/common/*.cpp)
+file(GLOB ARK_WEB_BRIDGE_SOURCES CONFIGURE_DEPENDS plugins/web_bridge/*.cpp)
 file(GLOB ARK_TEST_HOST_SOURCES CONFIGURE_DEPENDS tests/host/*.cpp)
 
 # ---------------------------------------------------------------------------
 # Third-party libraries
 # ---------------------------------------------------------------------------
 add_library(ark_headers INTERFACE)
-target_include_directories(ark_headers INTERFACE include "${IMGUI_DIR}")
+target_include_directories(ark_headers INTERFACE include third_party "${IMGUI_DIR}")
 target_compile_definitions(ark_headers INTERFACE
   UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN IMGUI_USER_CONFIG="ark/imgui_config.h")
 
@@ -107,6 +109,31 @@ ark_wide_entry_point(ArkFrameworkLoader ArkFrameworkHost)
 add_library(damage_meter SHARED ${ARK_DAMAGE_METER_SOURCES})
 target_link_libraries(damage_meter PRIVATE ark_headers ArkImGui user32)
 ark_output_directory("${ARK_DIST_DIRECTORY}/plugins" damage_meter)
+# The graphical self-test uses damage_meter's synthetic battle event provider.
+add_dependencies(ArkFrameworkHost damage_meter)
+
+add_library(BetterBattle SHARED ${ARK_BETTER_BATTLE_SOURCES})
+target_link_libraries(BetterBattle PRIVATE ark_headers ArkImGui user32)
+ark_output_directory("${ARK_DIST_DIRECTORY}/plugins" BetterBattle)
+
+add_library(web_bridge SHARED ${ARK_WEB_BRIDGE_SOURCES})
+target_link_libraries(web_bridge PRIVATE ark_headers ArkImGui user32)
+ark_output_directory("${ARK_DIST_DIRECTORY}/plugins" web_bridge)
+
+find_program(DOTNET_EXECUTABLE dotnet)
+if(DOTNET_EXECUTABLE)
+  set(ARK_BETTER_BATTLE_WEB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/webview")
+  set(ARK_BETTER_BATTLE_WEB_OUT "${ARK_DIST_DIRECTORY}/BetterBattleWeb")
+  add_custom_target(BetterBattleWeb ALL
+    COMMAND ${DOTNET_EXECUTABLE} publish "${ARK_BETTER_BATTLE_WEB_DIR}/BetterBattleWeb.csproj"
+            -c Release -r win-x64 --self-contained false -o "${ARK_BETTER_BATTLE_WEB_OUT}"
+    BYPRODUCTS "${ARK_BETTER_BATTLE_WEB_OUT}/BetterBattleWeb.exe"
+    WORKING_DIRECTORY "${ARK_BETTER_BATTLE_WEB_DIR}"
+    COMMENT "Publishing BetterBattle WebView2 host"
+    VERBATIM)
+else()
+  message(WARNING "dotnet was not found; skipping the BetterBattleWeb WebView2 host")
+endif()
 
 # ---------------------------------------------------------------------------
 # Tests
