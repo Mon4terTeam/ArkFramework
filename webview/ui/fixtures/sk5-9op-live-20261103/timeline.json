@@ -1,0 +1,201 @@
+{
+  "name": "SK-5 9-op live capture",
+  "stage": "Obt/Weekly/level_weekly_armor_5",
+  "stageId": "wk_armor_5",
+  "capturedAt": "2026-11-03T14:50:58+08:00",
+  "game": "E:\\Games\\ArkTest\\Arknights\\Arknights.exe",
+  "record": "recordings/sk5_9op_complete_20261103_010140.json",
+  "logicalFps": 30,
+  "catalog": "catalog.json",
+  "profiles": "profiles.json",
+  "snapshots": [
+    {
+      "file": "snapshots/frame-000042.json",
+      "frame": 42,
+      "seconds": 1.4,
+      "label": "开局 · 12 张待部署卡",
+      "units": 0,
+      "cards": 12,
+      "buffs": 0,
+      "activeSkills": [],
+      "cost": 21,
+      "paused": false,
+      "state": 2,
+      "result": "录像回放已装载：E:\\Games\\ArkTest\\ArkFramework\\recordings\\sk5_9op_complete_20261103_010140.json，50 个操作"
+    },
+    {
+      "file": "snapshots/frame-000507.json",
+      "frame": 507,
+      "seconds": 16.9,
+      "label": "首次部署 · 凛御银灰",
+      "units": 1,
+      "cards": 12,
+      "buffs": 6,
+      "activeSkills": [],
+      "cost": 25,
+      "paused": false,
+      "state": 2,
+      "result": "录像回放已装载：E:\\Games\\ArkTest\\ArkFramework\\recordings\\sk5_9op_complete_20261103_010140.json，50 个操作"
+    },
+    {
+      "file": "snapshots/frame-001002.json",
+      "frame": 1002,
+      "seconds": 33.4,
+      "label": "三人成形 · 银灰 / 冻河 / 安洁莉娜",
+      "units": 3,
+      "cards": 12,
+      "buffs": 13,
+      "activeSkills": [],
+      "cost": 11,
+      "paused": false,
+      "state": 2,
+      "result": "录像回放已装载：E:\\Games\\ArkTest\\ArkFramework\\recordings\\sk5_9op_complete_20261103_010140.json，50 个操作"
+    },
+    {
+      "file": "snapshots/frame-001243.json",
+      "frame": 1243,
+      "seconds": 41.43,
+      "label": "技能窗口 · 冻河 + 安洁莉娜",
+      "units": 3,
+      "cards": 12,
+      "buffs": 32,
+      "activeSkills": [
+        "char_4244_tocka",
+        "char_1015_aglna2"
+      ],
+      "cost": 19,
+      "paused": false,
+      "state": 2,
+      "result": "录像回放已装载：E:\\Games\\ArkTest\\ArkFramework\\recordings\\sk5_9op_complete_20261103_010140.json，50 个操作"
+    },
+    {
+      "file": "snapshots/frame-001993.json",
+      "frame": 1993,
+      "seconds": 66.43,
+      "label": "六人场 · 遥开启技能",
+      "units": 6,
+      "cards": 12,
+      "buffs": 35,
+      "activeSkills": [
+        "char_4202_haruka"
+      ],
+      "cost": 10,
+      "paused": false,
+      "state": 2,
+      "result": "录像回放已装载：E:\\Games\\ArkTest\\ArkFramework\\recordings\\sk5_9op_complete_20261103_010140.json，50 个操作"
+    },
+    {
+      "file": "snapshots/frame-002998.json",
+      "frame": 2998,
+      "seconds": 99.93,
+      "label": "六人场 · 冻河 + 令技能",
+      "units": 6,
+      "cards": 12,
+      "buffs": 39,
+      "activeSkills": [
+        "char_4244_tocka",
+        "char_2023_ling"
+      ],
+      "cost": 15,
+      "paused": false,
+      "state": 2,
+      "result": "录像回放已装载：E:\\Games\\ArkTest\\ArkFramework\\recordings\\sk5_9op_complete_20261103_010140.json，50 个操作"
+    },
+    {
+      "file": "snapshots/frame-004004.json",
+      "frame": 4004,
+      "seconds": 133.47,
+      "label": "七人场 · 遥 / 澄闪 / 陈技能",
+      "units": 7,
+      "cards": 12,
+      "buffs": 51,
+      "activeSkills": [
+        "char_4202_haruka",
+        "char_377_gdglow",
+        "char_1050_chen3"
+      ],
+      "cost": 7,
+      "paused": false,
+      "state": 2,
+      "result": "录像回放已装载：E:\\Games\\ArkTest\\ArkFramework\\recordings\\sk5_9op_complete_20261103_010140.json，50 个操作"
+    },
+    {
+      "file": "snapshots/frame-004528.json",
+      "frame": 4528,
+      "seconds": 150.93,
+      "label": "高压段 · 5 人技能同时生效",
+      "units": 7,
+      "cards": 12,
+      "buffs": 70,
+      "activeSkills": [
+        "char_4244_tocka",
+        "char_1015_aglna2",
+        "char_4202_haruka",
+        "char_377_gdglow",
+        "char_4247_oxi"
+      ],
+      "cost": 23,
+      "paused": false,
+      "state": 2,
+      "result": "录像回放已装载：E:\\Games\\ArkTest\\ArkFramework\\recordings\\sk5_9op_complete_20261103_010140.json，50 个操作"
+    },
+    {
+      "file": "snapshots/frame-005744.json",
+      "frame": 5744,
+      "seconds": 191.47,
+      "label": "中后段 · 安洁莉娜 / 遥 / 澄闪 / 陈",
+      "units": 7,
+      "cards": 12,
+      "buffs": 65,
+      "activeSkills": [
+        "char_1015_aglna2",
+        "char_4202_haruka",
+        "char_377_gdglow",
+        "char_1050_chen3"
+      ],
+      "cost": 64,
+      "paused": false,
+      "state": 2,
+      "result": "录像回放已装载：E:\\Games\\ArkTest\\ArkFramework\\recordings\\sk5_9op_complete_20261103_010140.json，50 个操作"
+    },
+    {
+      "file": "snapshots/frame-006839.json",
+      "frame": 6839,
+      "seconds": 227.97,
+      "label": "收尾前 · 7 人场",
+      "units": 7,
+      "cards": 12,
+      "buffs": 64,
+      "activeSkills": [
+        "char_4244_tocka",
+        "char_4202_haruka",
+        "char_377_gdglow",
+        "char_1050_chen3"
+      ],
+      "cost": 99,
+      "paused": false,
+      "state": 2,
+      "result": "录像回放已装载：E:\\Games\\ArkTest\\ArkFramework\\recordings\\sk5_9op_complete_20261103_010140.json，50 个操作"
+    },
+    {
+      "file": "snapshots/frame-006927.json",
+      "frame": 6927,
+      "seconds": 230.9,
+      "label": "结算 · 回放完成",
+      "units": 7,
+      "cards": 12,
+      "buffs": 72,
+      "activeSkills": [
+        "char_4244_tocka",
+        "char_1015_aglna2",
+        "char_4202_haruka",
+        "char_377_gdglow",
+        "char_1050_chen3"
+      ],
+      "cost": 99,
+      "paused": true,
+      "state": 3,
+      "result": "录像回放完成，已执行 50 个操作，最后帧 6841"
+    }
+  ]
+}

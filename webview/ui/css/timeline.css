@@ -1,0 +1,229 @@
+@import url("timeline-tas.css");
+
+#page-timeline {
+  gap: 10px;
+}
+
+#page-timeline .page-head {
+  flex: none;
+}
+
+.tas-ff {
+  display: inline-flex;
+  flex: none;
+  gap: 0;
+  margin-left: 4px;
+}
+
+.tas-jump-mode {
+  display: inline-flex;
+  flex: none;
+  margin-left: 4px;
+}
+
+.tas-jump-mode .btn.tiny {
+  min-width: 46px;
+  padding: 0 6px;
+  font-size: 10px;
+}
+
+.tas-jump-mode .btn.tiny + .btn.tiny {
+  margin-left: -1px;
+}
+
+.tas-jump-mode .btn.tiny.is-active {
+  position: relative;
+  z-index: 1;
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--line));
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface-2));
+  color: var(--text);
+}
+
+.tas-ff .btn.tiny {
+  min-width: 42px;
+  padding: 0 5px;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tas-ff .btn.tiny + .btn.tiny {
+  margin-left: -1px;
+}
+
+.tas-data-note {
+  flex: none;
+  margin: -2px 0 8px;
+  padding: 6px 8px;
+  border-left: 2px solid color-mix(in srgb, var(--amber) 65%, transparent);
+  background: color-mix(in srgb, var(--amber) 5%, transparent);
+  color: var(--muted);
+  font: 9.5px/1.45 var(--font-mono);
+}
+
+#actionModal .tas-modal-warning {
+  margin: 0;
+  padding: 14px 10px 18px;
+  font-size: 14px;
+  line-height: 1.7;
+  text-align: center;
+}
+
+.tas-tree-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  color: var(--muted);
+  font: 11px/1.6 var(--font-mono);
+  text-align: center;
+  pointer-events: none;
+}
+
+.tas-node.is-selected {
+  outline: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: 2px;
+}
+
+.tas-node.is-preview {
+  opacity: 0.72;
+}
+
+.tas-node.is-compact .tas-node-edge {
+  gap: 3px;
+}
+
+.tas-node.is-compact .tas-node-edge time {
+  display: none;
+}
+
+.tas-node.is-compact .tas-node-edge b {
+  font-size: 9px;
+}
+
+.tas-detail-empty {
+  display: grid;
+  min-height: 120px;
+  place-items: center;
+  color: var(--muted);
+  font: 10px/1.5 var(--font-mono);
+  text-align: center;
+}
+
+.tas-detail-actions {
+  display: flex;
+  gap: 6px;
+  padding-top: 12px;
+}
+
+.tas-detail-source {
+  margin-top: 8px;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--muted);
+  font: 9px/1.45 var(--font-mono);
+}
+
+.tas-detail-source strong {
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+.tas-event-row[data-unavailable="true"] {
+  cursor: default;
+  opacity: 0.64;
+}
+
+.tas-event-row[data-unavailable="true"]:hover {
+  background: transparent;
+  color: var(--text-2);
+}
+
+.tas-event-frame-input {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font: 9px/1 var(--font-mono);
+}
+
+.tas-cursor[hidden] {
+  display: none;
+}
+
+.tas-cursor span {
+  min-width: 44px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.tas-node-lane.is-event {
+  --lane-color: var(--tas-combat);
+}
+
+.tas-node-lane.is-world {
+  --lane-color: var(--tas-resource);
+}
+
+.tas-node-event {
+  transform: translateX(-50%);
+}
+
+.tas-detail-top .tas-detail-frame {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.tas-detail-top .tas-detail-frame .btn.tiny {
+  padding: 4px 8px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.tas-path-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
+.tas-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2);
+  font: 10px/1.4 var(--font-mono);
+  cursor: pointer;
+}
+
+.tas-check input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+#timelineState.is-worldline {
+  color: var(--amber);
+}
+
+.tas-modal-field select {
+  width: 100%;
+  min-height: 150px;
+  padding: 5px;
+  border: 1px solid var(--line-strong);
+  outline: none;
+  background: var(--surface-2);
+  color: var(--text);
+  font: 10px/1.35 var(--font-mono);
+}
+
+.tas-modal-field select:focus {
+  border-color: var(--accent);
+}
+
+#loadTimelineModal .tas-modal-panel {
+  width: min(560px, calc(100vw - 40px));
+}

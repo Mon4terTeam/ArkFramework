@@ -1,0 +1,26 @@
+{
+  "name": "Talent and module fixture",
+  "stage": "Obt/Weekly/level_weekly_armor_5",
+  "stageId": "wk_armor_5",
+  "capturedAt": "2026-11-03T21:57:27.0531298+08:00",
+  "game": "E:\\Games\\ArkTest\\Arknights\\Arknights.exe",
+  "logicalFps": 30,
+  "catalog": "catalog.json",
+  "profiles": "talent-test_profiles.json",
+  "snapshots": [
+    {
+      "file": "talent-test_snapshot.json",
+      "frame": 21,
+      "seconds": 0.7,
+      "label": "未部署 · 天赋与模组",
+      "units": 0,
+      "cards": 4,
+      "buffs": 0,
+      "activeSkills": [],
+      "cost": 20,
+      "paused": true,
+      "state": 2,
+      "result": "战斗已暂停"
+    }
+  ]
+}

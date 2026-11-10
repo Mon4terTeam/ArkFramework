@@ -1,0 +1,986 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BetterBattle</title>
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/battle.css">
+  <link rel="stylesheet" href="css/battle-cards.css">
+  <link rel="stylesheet" href="css/squad.css">
+  <link rel="stylesheet" href="css/squad-slots.css">
+  <link rel="stylesheet" href="css/damage.css">
+  <link rel="stylesheet" href="css/config.css">
+  <link rel="stylesheet" href="css/timeline.css">
+  <script defer src="assets/game/module-index.js"></script>
+  <script defer src="assets/game/roster-data.js"></script>
+  <script defer src="data/abnormal-names.js"></script>
+  <script defer src="data/stages.js"></script>
+  <script defer src="data/rogue.js"></script>
+  <script defer src="data/battle-config.js"></script>
+  <script defer src="js/protocol.js"></script>
+  <script defer src="js/buff-catalog.js"></script>
+  <script defer src="js/asset-loader.js"></script>
+  <script defer src="js/session.js"></script>
+  <script defer src="js/features-config.js"></script>
+  <script defer src="js/features-config-actions.js"></script>
+  <script defer src="js/features-squad.js"></script>
+  <script defer src="js/features-battle.js"></script>
+  <script defer src="js/features-damage.js"></script>
+  <script defer src="js/features-enemies.js"></script>
+  <script defer src="js/app.js"></script>
+  <script defer src="js/timeline.js"></script>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <h1>BetterBattle</h1>
+      </div>
+      <nav id="nav" class="nav topnav">
+        <button class="nav-item active" data-tab="battle">战斗</button>
+        <button class="nav-item" data-tab="enemies">敌方</button>
+        <button class="nav-item" data-tab="squad">编队</button>
+        <button class="nav-item" data-tab="config">战斗配置</button>
+        <button class="nav-item" data-tab="timeline">时间轴</button>
+        <button class="nav-item" data-tab="damage">数据统计</button>
+        <button class="nav-item" data-tab="diagnostics">诊断</button>
+      </nav>
+      <div class="time-unit-switch config-segmented" role="group" aria-label="时间显示单位">
+        <span class="time-unit-label">时间</span>
+        <button type="button" data-time-unit="frame" title="战斗页与统计页以帧显示">F</button>
+        <button type="button" data-time-unit="seconds" class="is-active" title="统计图以秒显示；战斗页长时长用秒">s</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+        <section class="page active" id="page-battle">
+          <div class="battle-statusbar">
+            <div class="button-row">
+              <button class="btn" id="pauseButton" data-action="pause">暂停</button>
+              <button class="btn primary" id="resumeButton" data-action="resume">继续</button>
+              <button class="btn ghost" data-action="refresh">刷新</button>
+              <button class="btn danger" data-action="leave">退出战斗</button>
+            </div>
+            <div class="battle-state">
+              <span class="badge" id="stateBadge">等待</span>
+              <span class="badge" id="pauseBadge">未暂停</span>
+              <span class="badge" id="deckBadge">待部署 --</span>
+              <span class="badge" id="costBadge">费用 --</span>
+            </div>
+            <div class="result compact" id="resultBox">暂无操作</div>
+          </div>
+
+          <div class="battle-layout">
+            <aside class="unit-rail-panel">
+              <div class="rail-title">干员</div>
+              <div id="unitRail" class="unit-rail">
+                <div class="empty-small">进入战斗并部署干员后显示</div>
+              </div>
+            </aside>
+
+            <div class="focus-grid">
+              <div class="focus-main-left">
+                <div class="left-top">
+                  <article class="panel art-panel">
+                    <div class="art-stage" id="artStage">
+                      <canvas id="artCanvas"></canvas>
+                      <div class="art-empty" id="artEmpty">
+                        <span>等待立绘</span>
+                      </div>
+                    </div>
+                    <div class="art-meta">
+                      <div>
+                        <strong id="focusName">未选择单位</strong>
+                        <span id="focusMeta" class="muted">部署后显示</span>
+                      </div>
+                      <div class="page-tags" id="focusBadges"></div>
+                    </div>
+                    <div id="artError" class="art-error"></div>
+                  </article>
+
+                  <article class="panel skill-panel">
+                    <section class="skill-zone">
+                      <div class="panel-head">
+                        <span id="skillId"></span>
+                        <h3 id="skillName">技能</h3>
+                      </div>
+                      <div class="skill-body">
+                        <div class="skill-copy">
+                          <div class="section-label">技能说明</div>
+                          <div class="skill-description" id="skillDescription">部署干员后读取当前技能。</div>
+                        </div>
+                        <div class="skill-live">
+                          <div class="skill-meter">
+                            <div class="meter-label"><span>SP</span><span id="skillSpLabel">-- / --</span></div>
+                            <div class="bar sp"><i id="skillSpBar" style="width:0%"></i></div>
+                          </div>
+                          <div class="skill-meter">
+                            <div class="meter-label"><span>剩余持续时间</span><span id="skillRemainLabel">--</span></div>
+                            <div class="bar"><i id="skillRemainBar" style="width:0%"></i></div>
+                          </div>
+                          <div class="skill-facts" id="skillFacts"></div>
+                        </div>
+                      </div>
+                      <div class="unit-actions" id="focusActions"></div>
+                    </section>
+                    <section class="module-zone">
+                      <div class="module-tabs" role="tablist" aria-label="天赋与模组">
+                        <button class="module-tab is-active" data-module-tab="talent">天赋</button>
+                        <button class="module-tab" data-module-tab="module">模组</button>
+                      </div>
+                      <div class="module-tab-content">
+                        <div class="module-tab-page is-active" id="talentPage">
+                          <div class="talent-grid" id="talentGrid"></div>
+                        </div>
+                        <div class="module-tab-page" id="modulePage">
+                          <div class="module-head">
+                            <span class="module-icon-box" id="moduleIconBox">
+                              <img id="moduleIcon" alt="" hidden>
+                              <span class="module-type" id="moduleType">MOD</span>
+                            </span>
+                            <div class="module-title">
+                              <span class="section-label">模组效果</span>
+                              <h4 id="moduleName">未携带模组</h4>
+                            </div>
+                            <span id="moduleLevel" class="module-level"></span>
+                          </div>
+                          <div class="module-description" id="moduleDescription">部署后读取当前携带的模组。</div>
+                          <div class="module-stats" id="moduleStats"></div>
+                        </div>
+                      </div>
+                    </section>
+                  </article>
+                </div>
+
+                <article class="panel stats-panel">
+                  <div class="panel-head"><h3>当前属性</h3><span id="statsHint">当前战斗数值</span></div>
+                  <div class="stats-grid" id="statsGrid">
+                    <div class="stat-cell"><span>生命</span><strong>--</strong></div>
+                    <div class="stat-cell"><span>攻击</span><strong>--</strong></div>
+                  </div>
+                  <div class="stats-abnormal">
+                    <div class="stats-abnormal-head">
+                      <span>异常状态</span>
+                      <span id="statsAbnormalCount">0</span>
+                    </div>
+                    <div class="stats-abnormal-chips" id="statsAbnormalChips">
+                      <span class="stats-abnormal-none">未选择单位</span>
+                    </div>
+                  </div>
+                </article>
+              </div>
+
+              <div class="focus-right">
+                <article class="panel battle-right-panel">
+                  <div class="battle-right-tabs" id="battleRightTabs" role="tablist" aria-label="战斗信息">
+                    <button type="button" class="is-active" data-action="battle-right-tab" data-tab="stats" role="tab" aria-selected="true">数据统计</button>
+                    <button type="button" data-action="battle-right-tab" data-tab="buffs" role="tab" aria-selected="false">Buff <span id="focusBuffCount">0</span></button>
+                    <button type="button" data-action="battle-right-tab" data-tab="global" role="tab" aria-selected="false">全局效果/藏品 <span id="globalBuffCount">0</span></button>
+                  </div>
+                  <div class="battle-right-pages">
+                    <div class="battle-right-page is-active" id="battleRightStats">
+                      <div class="battle-stat-charts" id="battleStatCharts"></div>
+                    </div>
+                    <div class="battle-right-page" id="battleRightBuffs">
+                      <div class="buff-list" id="focusBuffs">
+                        <div class="empty-small">无</div>
+                      </div>
+                    </div>
+                    <div class="battle-right-page" id="battleRightGlobal">
+                      <div class="buff-list global-buff-list" id="globalBuffs">
+                        <div class="empty-small">无</div>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              </div>
+          </div>
+          </div>
+        </section>
+
+        <section class="page" id="page-squad">
+          <div class="page-head squad-page-head">
+            <div>
+              <h2>关卡与编队</h2>
+              <p id="squadLimitHint">当前关卡上限 12 人，共 14 个编队槽位。</p>
+            </div>
+            <div class="squad-head-actions">
+              <span class="squad-replay-lock" id="squadReplayLock" hidden>
+                回放中 · 编队已锁定
+              </span>
+              <div class="squad-count-block">
+                <strong id="squadCount">0 / 12</strong>
+                <span>已编入</span>
+              </div>
+              <button class="btn ghost" id="cacheArtButton" data-action="cache-art" type="button">
+                缓存图片资源
+              </button>
+              <span class="art-cache-progress" id="artCacheProgress" hidden>
+                <span class="bar"><i id="artCacheBar"></i></span>
+                <small id="artCacheLabel">0 / 0</small>
+              </span>
+              <button class="btn primary" id="squadStartButton" data-action="start">进入战斗</button>
+            </div>
+          </div>
+
+          <div class="squad-stage-row">
+            <div class="squad-stage-field">
+              <select id="stageMode" class="stage-mode-select" aria-label="关卡类型">
+                <option value="normal">普通关卡</option>
+                <option value="rogue">肉鸽关卡</option>
+              </select>
+              <label for="stageInput">关卡</label>
+              <select id="rogueTopic" class="stage-topic-select" aria-label="肉鸽主题" hidden></select>
+              <div class="stage-combobox" id="stageCombobox">
+                <input id="stageInput" value="" spellcheck="false"
+                  placeholder="输入关卡 ID、代号或名称" autocomplete="off"
+                  role="combobox" aria-autocomplete="list" aria-expanded="false"
+                  aria-controls="stageOptions">
+                <button class="stage-combobox-toggle" id="stageToggle" type="button"
+                  aria-label="展开关卡列表" tabindex="-1">▾</button>
+              </div>
+              <small id="stageResolvedName"></small>
+            </div>
+            <ul class="stage-options" id="stageOptions" role="listbox" hidden></ul>
+            <span class="squad-stage-note">点击已编入干员可更换；超出关卡上限的槽位不可选择。</span>
+            <button class="btn ghost" id="squadClearButton" data-action="clear-squad">清空</button>
+          </div>
+
+          <section class="squad-board" id="squadBoard" aria-label="编队槽位">
+            <div class="squad-slot-row" id="squadRowTop"></div>
+            <div class="squad-add-axis">
+              <span class="squad-axis-line"></span>
+              <button class="squad-add-button" id="squadAddButton" type="button" data-action="open-squad-picker"
+                aria-label="打开干员目录">
+                <span class="squad-add-plus" aria-hidden="true"></span>
+                <small>添加干员</small>
+              </button>
+              <span class="squad-axis-line"></span>
+            </div>
+            <div class="squad-slot-row" id="squadRowBottom"></div>
+          </section>
+
+          <footer class="squad-selection-bar" id="squadSelectionBar" aria-live="polite">
+            <span class="squad-selection-summary">
+              <span class="squad-selection-kicker">CURRENT</span>
+              <strong id="squadSelectionName">未选择干员</strong>
+              <span class="squad-selection-separator"></span>
+              <span id="squadSelectionDetail">点击干员卡槽查看当前技能与模组</span>
+            </span>
+            <span class="squad-selection-editor" id="squadSelectionEditor"></span>
+            <code id="rosterPreview" hidden></code>
+          </footer>
+
+          <div class="squad-picker" id="squadPicker" hidden>
+            <button class="squad-picker-scrim" type="button"
+              data-action="squad-picker-close" aria-label="关闭干员目录"></button>
+            <section class="squad-picker-panel" role="dialog" aria-modal="true"
+              aria-labelledby="squadPickerTitle">
+              <header class="squad-picker-head">
+                <div>
+                  <span class="squad-picker-eyebrow">OPERATOR ROSTER</span>
+                  <h3 id="squadPickerTitle">干员目录</h3>
+                </div>
+                <div class="squad-picker-head-meta">
+                  <span id="squadPickerTarget">选择干员加入编队</span>
+                  <button class="squad-picker-close" type="button"
+                    data-action="squad-picker-close" aria-label="关闭">×</button>
+                </div>
+              </header>
+              <div class="squad-picker-tools">
+                <label class="squad-picker-search">
+                  <span aria-hidden="true">⌕</span>
+                  <input id="squadPickerSearch" type="search"
+                    placeholder="搜索干员名称或 ID" autocomplete="off">
+                </label>
+                <span id="squadPickerCount">0 名</span>
+              </div>
+              <div class="squad-picker-list" id="squadPickerList"></div>
+              <footer class="squad-picker-foot">
+                <span>点击干员加入空位或更换当前槽位。</span>
+                <span><kbd>Esc</kbd> 关闭</span>
+              </footer>
+            </section>
+          </div>
+        </section>
+
+        <section class="page" id="page-config">
+          <div class="page-head config-page-head">
+            <div>
+              <h2>战斗配置</h2>
+              <p>为下一次肉鸽启动准备藏品、难度、主题机制与科技树。</p>
+            </div>
+            <div class="page-tags">
+              <span class="badge" id="configSummaryBadge">尚未选择主题</span>
+              <span class="badge" id="configApplyBadge">配置随启动生效</span>
+            </div>
+          </div>
+
+          <div class="config-layout">
+            <aside class="config-sidebar">
+              <div class="config-sidebar-title">
+                <span>ROGUELIKE</span>
+                <strong>主题</strong>
+              </div>
+              <div id="configTopicList" class="config-topic-list"></div>
+              <div class="config-sidebar-section">
+                <div class="section-label">难度</div>
+                <select id="configDifficulty" class="config-select" aria-label="肉鸽难度"></select>
+                <p id="configDifficultyDesc" class="config-note"></p>
+              </div>
+              <div class="config-sidebar-section">
+                <div class="section-label">当前配置</div>
+                <div id="configSummary" class="config-summary"></div>
+              </div>
+              <button class="btn primary config-apply-button" data-action="config-apply">
+                应用并开始战斗
+              </button>
+              <button class="btn ghost config-reset-button" data-action="config-reset">
+                重置当前主题配置
+              </button>
+            </aside>
+
+            <div class="config-main">
+              <article class="panel config-panel config-resource-panel">
+                <div class="config-panel-head">
+                  <div>
+                    <span class="section-label">RUN CONTEXT</span>
+                    <h3 id="configResourceTitle">局外信息</h3>
+                  </div>
+                  <span class="badge" id="configResourceBadge">默认值</span>
+                </div>
+                <div id="configResourceGrid" class="config-resource-grid">
+                  <label class="config-resource-field" data-resource-field="gold">
+                    <span>源石锭</span>
+                    <input id="configResourceGold" type="number" min="0" max="9999"
+                      step="1" data-config-resource="gold" inputmode="numeric">
+                  </label>
+                  <label class="config-resource-field" data-resource-field="scrap">
+                    <span>零件数</span>
+                    <input id="configResourceScrap" type="number" min="0" max="9999"
+                      step="1" data-config-resource="scrap" inputmode="numeric"
+                      placeholder="按藏品推导">
+                  </label>
+                  <label class="config-resource-field" data-resource-field="scrapLimit">
+                    <span>零件上限</span>
+                    <input id="configResourceScrapLimit" type="number" min="0" max="9999"
+                      step="1" data-config-resource="scrapLimit" inputmode="numeric">
+                  </label>
+                </div>
+                <div class="config-mastery-panel" id="configMasteryPanel" hidden>
+                  <div class="config-mastery-head">
+                    <div>
+                      <span class="section-label">SPECIAL OPERATOR</span>
+                      <strong>特勤干员精通</strong>
+                    </div>
+                    <span class="badge" id="configMasteryBadge">0 项</span>
+                  </div>
+                  <div id="configMasteryList" class="config-mastery-list"></div>
+                </div>
+              </article>
+
+              <article class="panel config-panel">
+                <div class="config-panel-head">
+                  <div>
+                    <span class="section-label">COLLECTIBLES</span>
+                    <h3>藏品</h3>
+                    <p>直接调用游戏内置藏品数据；同名变体按主题表区分。</p>
+                  </div>
+                  <div class="config-selected-count">
+                    <strong id="configRelicCount">0</strong>
+                    <span>已选择</span>
+                  </div>
+                </div>
+                <div class="config-toolbar">
+                  <label class="config-search">
+                    <span aria-hidden="true">⌕</span>
+                    <input id="configRelicSearch" type="search"
+                      placeholder="搜索藏品名称、效果或 ID" autocomplete="off">
+                  </label>
+                  <div id="configRarityTabs" class="config-segmented" role="tablist">
+                    <button class="is-active" data-rarity="all">全部</button>
+                    <button data-rarity="4">稀有</button>
+                    <button data-rarity="3">罕见</button>
+                    <button data-rarity="2">普通</button>
+                  </div>
+                </div>
+                <div id="configSelectedRelics" class="config-selected-strip"></div>
+                <div id="configRelicGrid" class="config-relic-grid"></div>
+                <div id="configRelicEmpty" class="empty-small" hidden>没有匹配的藏品</div>
+              </article>
+
+              <article class="panel config-panel">
+                <div class="config-panel-head">
+                  <div>
+                    <span class="section-label">TOPIC MECHANICS</span>
+                    <h3 id="configSpecialTitle">主题特殊机制</h3>
+                    <p>同一类别选择一个；标记“仅展示”的项不会写入战斗启动参数。</p>
+                  </div>
+                  <span class="badge" id="configSpecialBadge">0 项</span>
+                </div>
+                <div id="configSpecialTabs" class="config-special-tabs"></div>
+                <div id="configSpecialGrid" class="config-special-grid"></div>
+              </article>
+
+              <article class="panel config-panel" id="configCharBuffPanel" hidden>
+                <div class="config-panel-head">
+                  <div>
+                    <span class="section-label">OPERATOR BUFF</span>
+                    <h3 id="configCharBuffTitle">干员 Buff</h3>
+                    <p id="configCharBuffNote">选中后只作用于下方勾选的编队干员；不选目标则保持空目标列表。</p>
+                  </div>
+                  <span class="badge" id="configCharBuffBadge">0 项</span>
+                </div>
+                <div id="configCharBuffGrid" class="config-special-grid"></div>
+                <div class="config-charbuff-targets">
+                  <div class="section-label">作用干员</div>
+                  <div id="configCharBuffSelected" class="config-charbuff-list"></div>
+                </div>
+              </article>
+
+              <article class="panel config-panel" id="configCopperPanel" hidden>
+                <div class="config-panel-head">
+                  <div>
+                    <span class="section-label">IN-RUN SYSTEM</span>
+                    <h3>钱币 / 局内增益</h3>
+                    <p>选中后按表内 buff 定义注入；没有 buff 定义的条目不可选。</p>
+                  </div>
+                  <span class="badge" id="configCopperBadge">0 项</span>
+                </div>
+                <label class="config-search">
+                  <span aria-hidden="true">⌕</span>
+                  <input id="configCopperSearch" type="search"
+                    placeholder="搜索钱币名称、效果或 ID" autocomplete="off">
+                </label>
+                <div id="configCopperGrid" class="config-special-grid"></div>
+              </article>
+
+              <article class="panel config-panel" id="configFragmentPanel" hidden>
+                <div class="config-panel-head">
+                  <div>
+                    <span class="section-label">IN-RUN BUFF</span>
+                    <h3>思绪</h3>
+                    <p>萨卡兹思绪；只列出能直接映射到全局战斗数值的条目。</p>
+                  </div>
+                  <span class="badge" id="configFragmentBadge">0 项</span>
+                </div>
+                <label class="config-search">
+                  <span aria-hidden="true">⌕</span>
+                  <input id="configFragmentSearch" type="search"
+                    placeholder="搜索思绪名称、效果或 ID" autocomplete="off">
+                </label>
+                <div id="configFragmentGrid" class="config-special-grid"></div>
+              </article>
+
+              <article class="panel config-panel" id="configTotemPanel" hidden>
+                <div class="config-panel-head">
+                  <div>
+                    <span class="section-label">IN-RUN BUFF</span>
+                    <h3>密文版</h3>
+                    <p>萨米密文；只列出可以确定战斗数值的条目。</p>
+                  </div>
+                  <span class="badge" id="configTotemBadge">0 项</span>
+                </div>
+                <label class="config-search">
+                  <span aria-hidden="true">⌕</span>
+                  <input id="configTotemSearch" type="search"
+                    placeholder="搜索密文名称、效果或 ID" autocomplete="off">
+                </label>
+                <div id="configTotemGrid" class="config-special-grid"></div>
+              </article>
+
+              <article class="panel config-panel" id="configConceptPanel" hidden>
+                <div class="config-panel-head">
+                  <div>
+                    <span class="section-label">IN-RUN BUFF</span>
+                    <h3>概念体</h3>
+                    <p>黑流树海被动加工品；同名概念体可重复叠加，标注“战斗”的条目会写入战斗启动参数。</p>
+                  </div>
+                  <span class="badge" id="configConceptBadge">0 项</span>
+                </div>
+                <div id="configSelectedConcepts" class="config-selected-strip"></div>
+                <div id="configConceptGrid" class="config-special-grid"></div>
+              </article>
+
+              <article class="panel config-panel">
+                <div class="config-panel-head">
+                  <div>
+                    <span class="section-label">META PROGRESSION</span>
+                    <h3>科技树 / 局外成长</h3>
+                    <p>按阶展示成长节点；可自由点选，不强制前置关系。</p>
+                  </div>
+                  <div class="config-tech-actions">
+                    <span class="badge" id="configTechBadge">0 项</span>
+                    <button class="btn tiny ghost" type="button" data-action="config-tech-all">全选</button>
+                    <button class="btn tiny ghost" type="button" data-action="config-tech-none">全不选</button>
+                  </div>
+                </div>
+                <div id="configTechTree" class="config-tech-tree"></div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="page" id="page-timeline">
+          <div class="page-head">
+            <div>
+              <h2>时间轴</h2>
+              <p>自动记录全部玩家操作；录像中手动操作会自动分叉并保留原录像未来。</p>
+            </div>
+            <div class="page-tags">
+              <span class="badge" id="timelinePauseBadge">等待战斗</span>
+              <span class="badge" id="timelineStageBadge">未连接</span>
+              <button class="btn" id="saveTimeline" type="button">保存</button>
+              <button class="btn" id="loadTimeline" type="button">加载</button>
+            </div>
+          </div>
+
+          <article class="panel tas-timeline-panel">
+            <div class="panel-head tas-timeline-head">
+              <div>
+                <h3>帧时间轴</h3>
+                <span class="tas-subtitle">fixedFrameCnt · 30 FPS · 实际节点树</span>
+              </div>
+              <div class="tas-timeline-status">
+                <div class="tas-segment-actions">
+                  <button class="tas-header-action" id="renameSegment" type="button">重命名</button>
+                  <button class="tas-header-action danger" id="deleteSegment" type="button">删除</button>
+                </div>
+                <button class="tas-view-badge" id="treeViewToggle" type="button">聚焦</button>
+                <span id="timelineState">等待战斗录制</span>
+              </div>
+            </div>
+
+            <div class="tas-transport">
+              <button class="btn tiny" id="jumpStart" type="button" title="回到时间段起点（只移动指针）">|◀</button>
+              <button class="btn tiny" data-step="-30" type="button" title="指针回退 1 秒">−30</button>
+              <button class="btn tiny" data-step="-1" type="button" title="指针回退 1 帧">−1</button>
+              <button class="btn tiny" id="playButton" type="button" aria-label="刷新时间轴" title="刷新时间轴">↻</button>
+              <button class="btn tiny" data-action="pause" type="button" title="暂停逻辑帧推进">暂停</button>
+              <button class="btn tiny primary" data-action="resume" type="button" title="继续逻辑帧推进">继续</button>
+              <button class="btn tiny" data-step="1" type="button" title="指针前进 1 帧">+1</button>
+              <button class="btn tiny" data-step="30" type="button" title="指针前进 1 秒">+30</button>
+              <button class="btn tiny" id="jumpEnd" type="button" title="跳到时间段末尾（只移动指针）">▶|</button>
+              <button class="btn tiny tas-split" id="splitBranch" type="button"
+                      title="重放至当前帧、暂停后继续录制">
+                回退并分叉
+              </button>
+              <span class="tas-jump-mode" role="group" aria-label="回退模式">
+                <button class="btn tiny is-active" id="jumpModeNormal" type="button"
+                        title="普通：按录像逐帧回放，稳定">普通</button>
+                <button class="btn tiny" id="jumpModeFast" type="button"
+                        title="快速(beta)：使用 ManualFrameTick 快速推进，可能出现预期外 bug">快速(beta)</button>
+              </span>
+              <span class="tas-ff" role="group" aria-label="快进">
+                <button class="btn tiny" data-ff="1" type="button" title="快进 1 帧">▶▶1</button>
+                <button class="btn tiny" data-ff="5" type="button" title="快进 5 帧">▶▶5</button>
+                <button class="btn tiny" data-ff="10" type="button" title="快进 10 帧">▶▶10</button>
+                <button class="btn tiny" data-ff="30" type="button" title="快进 30 帧">▶▶30</button>
+              </span>
+
+              <div class="tas-frame-readout">
+                <strong id="frameReadout">00000</strong>
+                <span>/ <span id="totalReadout">00000</span></span>
+              </div>
+
+              <div class="tas-jump">
+                <label for="frameInput">跳至</label>
+                <input id="frameInput" type="number" min="0" value="0" inputmode="numeric">
+                <button class="btn tiny ghost" id="frameGo" type="button" title="只移动指针">定位</button>
+              </div>
+            </div>
+
+            <div class="tas-tree-wrap">
+              <div class="tas-tree-scroll" id="treeScroll">
+                <div class="tas-tree-canvas" id="treeCanvas">
+                  <div class="tas-tree" id="tree">
+                    <svg class="tas-connectors" id="connectors" aria-hidden="true"></svg>
+                    <div class="tas-tree-nodes" id="treeNodes"></div>
+                    <div class="tas-cursor" id="cursor" hidden>
+                      <span id="cursorFlag">F00000</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="tas-timeline-foot">
+              <span class="tas-lane-legend">
+                <span><i class="operation"></i>玩家操作</span>
+                <span><i class="combat"></i>伤害采样</span>
+              </span>
+              <span class="tas-foot-note" id="treeHint">点击节点选帧；双击重命名</span>
+            </div>
+          </article>
+
+          <div class="tas-rewind-view" id="rewindView" hidden>
+            <span>世界线回溯中...</span>
+          </div>
+
+          <div class="tas-lower-grid">
+            <article class="panel tas-event-panel">
+              <div class="panel-head">
+                <div>
+                  <h3>战斗事件</h3>
+                  <span class="tas-subtitle" id="eventSummary">当前活动分支</span>
+                </div>
+                <span class="badge" id="activeSegmentBadge">无活动节点</span>
+              </div>
+
+              <div class="tas-filters" id="filters" role="group" aria-label="事件分类">
+                <button class="chip hot" data-filter="all" type="button">全部 <b>0</b></button>
+                <button class="chip" data-filter="operation" type="button">玩家操作 <b>0</b></button>
+                <button class="chip" data-filter="combat" type="button">战斗事件 <b>0</b></button>
+                <button class="chip" data-filter="world" type="button">世界事件 <b>0</b></button>
+              </div>
+
+              <div class="tas-event-list" id="eventList"></div>
+            </article>
+
+            <aside class="panel tas-detail-panel">
+              <div class="panel-head">
+                <div>
+                  <h3>事件详情</h3>
+                  <span class="tas-subtitle">真实采集字段</span>
+                </div>
+                <span class="badge" id="detailFrameBadge">—</span>
+              </div>
+              <div id="eventDetail"></div>
+            </aside>
+          </div>
+        </section>
+
+        <section class="page" id="page-enemies">
+          <div class="page-head">
+            <div>
+              <h2>敌方情报</h2>
+            </div>
+            <div class="page-tags">
+              <span class="badge" id="enemyCountBadge">在场 0</span>
+              <span class="badge" id="enemyWaveBadge">波次 --</span>
+              <span class="badge" id="enemyFocusBadge">未选中</span>
+            </div>
+          </div>
+
+          <div class="enemy-layout">
+            <aside class="panel enemy-list-panel">
+              <div class="panel-head">
+                <div>
+                  <h3>当前敌人</h3>
+                </div>
+              </div>
+              <div class="enemy-list" id="enemyList">
+                <div class="empty-small">等待敌人出场</div>
+              </div>
+            </aside>
+
+            <article class="panel enemy-detail-panel">
+              <div class="panel-head">
+                <div>
+                  <h3 id="enemyDetailName">未选择敌人</h3>
+                  <span class="enemy-subtle" id="enemyDetailMeta"></span>
+                </div>
+                <span class="badge" id="enemyDetailSerial">--</span>
+              </div>
+              <div class="enemy-hero">
+                <div class="enemy-avatar">
+                  <img id="enemyAvatar" alt="">
+                </div>
+                <div class="enemy-hero-text">
+                  <div class="enemy-profile-meta" id="enemyProfileMeta">--</div>
+                  <p class="enemy-description" id="enemyDescription">等待敌人资料</p>
+                  <div class="enemy-tags" id="enemyTags"></div>
+                </div>
+              </div>
+              <div class="enemy-detail-section">
+                <div class="section-label">当前属性</div>
+                <div class="enemy-stat-grid" id="enemyStatGrid"></div>
+              </div>
+              <div class="enemy-detail-section">
+                <div class="stats-abnormal-head">
+                  <span>异常状态</span>
+                  <span id="enemyAbnormalCount">0</span>
+                </div>
+                <div class="stats-abnormal-chips" id="enemyAbnormalChips">
+                  <span class="stats-abnormal-none">无异常</span>
+                </div>
+              </div>
+              <div class="enemy-detail-section">
+                <div class="section-label">能力</div>
+                <div class="enemy-ability-list" id="enemyAbilities">
+                  <div class="empty-small">该敌人没有可读取的图鉴能力</div>
+                </div>
+              </div>
+              <div class="enemy-detail-section">
+                <div class="section-label">技能</div>
+                <div class="enemy-skill-list" id="enemySkills">
+                  <div class="empty-small">该敌人没有可读取的技能，或尚未进入技能状态</div>
+                </div>
+              </div>
+              <div class="enemy-detail-section">
+                <div class="section-label">Buff</div>
+                <div class="enemy-buff-list" id="enemyBuffs">
+                  <div class="empty-small">当前没有 Buff</div>
+                </div>
+              </div>
+            </article>
+          </div>
+
+          <article class="panel enemy-wave-panel">
+            <div class="panel-head">
+              <div>
+                <h3>预计出场</h3>
+                <span class="enemy-subtle" id="enemyWaveMeta">来自 Scheduler 的计划波次；动态召唤不在其中</span>
+              </div>
+            </div>
+            <div class="enemy-waves" id="enemyWaves">
+              <div class="empty-small">等待关卡波次数据</div>
+            </div>
+          </article>
+        </section>
+
+        <section class="page" id="page-damage">
+          <div class="page-head">
+            <div>
+              <h2>数据统计</h2>
+              <p id="damagePageSubtitle">按物理、法术、真实、元素拆分，展示每名干员的累计输出曲线。</p>
+            </div>
+            <div class="page-tags">
+              <span class="badge" id="damageTotalBadge">总伤害 0</span>
+              <span class="badge" id="damageDpsBadge">DPS 0</span>
+              <span class="badge" id="damageStatusBadge">等待战斗</span>
+            </div>
+          </div>
+          <div class="stats-mode-tabs stats-mode-tabs-page" id="damageStatsTabs" role="tablist" aria-label="统计指标">
+            <button type="button" class="is-active" data-action="stats-mode" data-scope="page" data-mode="damage">伤害</button>
+            <button type="button" data-action="stats-mode" data-scope="page" data-mode="healing">治疗</button>
+            <button type="button" data-action="stats-mode" data-scope="page" data-mode="taken">承伤</button>
+          </div>
+          <div class="damage-page-layout">
+            <aside class="unit-rail-panel damage-roster-panel">
+              <div class="rail-title" id="damageRailTitle">输出干员</div>
+              <div id="damageUnitRail" class="unit-rail damage-unit-rail">
+                <div class="empty-small">等待伤害事件</div>
+              </div>
+            </aside>
+            <div class="damage-main">
+              <article class="panel damage-selected-panel">
+                <div class="panel-head">
+                  <div>
+                    <h3 id="damageSelectedName">未选择干员</h3>
+                    <span id="damageSelectedMeta" class="damage-subtle">暂无输出记录</span>
+                  </div>
+                  <span class="badge" id="damageSelectedShare">0%</span>
+                </div>
+                <div id="damageTypeGrid" class="damage-type-grid"></div>
+              </article>
+              <article class="panel damage-chart-panel">
+                <div class="panel-head">
+                  <div>
+                    <h3 id="damageChartTitle">全部干员输出曲线</h3>
+                    <span class="damage-subtle" id="damageChartHint">横轴为秒（30 FPS 逻辑帧），纵轴为累计实际伤害</span>
+                  </div>
+                  <div id="damageLegend" class="damage-legend"></div>
+                </div>
+                <div id="damageChart" class="damage-chart">
+                  <div class="empty-small">等待战斗伤害数据</div>
+                </div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="page" id="page-diagnostics">
+          <div class="page-head">
+            <div>
+              <h2>诊断</h2>
+              <p>IPC、插件任务队列、目录、快照与事件历史。</p>
+            </div>
+          </div>
+          <div class="grid two">
+            <article class="panel">
+              <div class="panel-head"><h3>运行时</h3><span>只读</span></div>
+              <div class="diag-grid">
+                <div><span>游戏插件</span><strong id="diagConnected">未连接</strong></div>
+                <div><span>任务队列</span><strong id="diagQueue">0</strong></div>
+                <div><span>干员目录</span><strong id="diagCatalog">0</strong></div>
+                <div><span>UID epoch</span><strong id="diagEpoch">0</strong></div>
+                <div><span>逻辑帧</span><strong id="diagFrame">0</strong></div>
+                <div><span>快照年龄</span><strong id="diagAge">--</strong></div>
+              </div>
+              <div class="diag-line"><span>请求文件</span><code id="diagRequestPath">未知</code></div>
+              <div class="diag-line"><span>关卡</span><code id="diagStage">--</code></div>
+              <div class="diag-line"><span>追踪字段</span><code id="diagTraceFields">--</code></div>
+            </article>
+            <article class="panel">
+              <div class="panel-head"><h3>事件</h3><button class="btn ghost tiny" data-action="clear-log">清空</button></div>
+              <div id="eventLog" class="event-log">
+                <div class="event"><time>--:--:--</time><span>等待事件</span></div>
+              </div>
+            </article>
+          </div>
+          <article class="panel">
+            <div class="panel-head"><h3>逐帧采集</h3><span id="traceBadge" class="badge">空闲</span></div>
+            <div class="diag-grid">
+              <div><span>状态变化</span><strong id="traceChanges">0</strong></div>
+              <div><span>丢弃行</span><strong id="traceDropped">0</strong></div>
+              <div><span>最近帧</span><strong id="traceFrame">0</strong></div>
+            </div>
+            <div id="traceFields" class="checks"></div>
+            <div class="button-row">
+              <button class="btn primary" data-action="trace-start">开始采集</button>
+              <button class="btn danger" data-action="trace-stop">停止</button>
+            </div>
+            <code class="file-note">battle_trace_frames.log</code>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><h3>最近快照 JSON</h3><span>截断显示</span></div>
+            <pre id="rawJson" class="raw-json">暂无数据</pre>
+          </article>
+        </section>
+    </main>
+  </div>
+
+  <div class="tas-modal" id="renameModal" hidden>
+    <div class="tas-modal-scrim" data-modal-close></div>
+    <section class="tas-modal-panel" role="dialog" aria-modal="true" aria-labelledby="renameTitle">
+      <div class="tas-modal-head">
+        <div>
+          <span>TIMELINE</span>
+          <h3 id="renameTitle">重命名节点</h3>
+        </div>
+        <button class="tas-modal-close" type="button" data-modal-close aria-label="关闭">×</button>
+      </div>
+      <div class="tas-modal-body">
+        <label class="tas-modal-field" for="segmentNameInput">
+          <span>名称</span>
+          <input id="segmentNameInput" type="text" maxlength="32" autocomplete="off">
+        </label>
+        <p class="tas-modal-note">留空时使用默认节点编号。</p>
+      </div>
+      <div class="tas-modal-actions">
+        <button class="btn tiny ghost" type="button" data-modal-close>取消</button>
+        <button class="btn tiny primary" id="confirmRename" type="button">保存名称</button>
+      </div>
+    </section>
+  </div>
+
+  <div class="tas-modal" id="deleteModal" hidden>
+    <div class="tas-modal-scrim" data-modal-close></div>
+    <section class="tas-modal-panel is-danger" role="dialog" aria-modal="true" aria-labelledby="deleteTitle">
+      <div class="tas-modal-head">
+        <div>
+          <span>DELETE TIMELINE</span>
+          <h3 id="deleteTitle">删除时间线节点</h3>
+        </div>
+        <button class="tas-modal-close" type="button" data-modal-close aria-label="关闭">×</button>
+      </div>
+      <div class="tas-modal-body">
+        <div class="tas-delete-target">
+          <strong id="deleteSegmentName">—</strong>
+          <span id="deleteSegmentRange">—</span>
+        </div>
+        <p class="tas-modal-warning">
+          该节点及其后续所有分支将从时间轴中删除，共 <b id="deleteDescendantCount">0</b> 个节点。
+        </p>
+      </div>
+      <div class="tas-modal-actions">
+        <button class="btn tiny ghost" type="button" data-modal-close>取消</button>
+        <button class="btn tiny danger" id="confirmDelete" type="button">删除节点</button>
+      </div>
+    </section>
+  </div>
+
+  <div class="tas-modal" id="saveTimelineModal" hidden>
+    <div class="tas-modal-scrim" data-timeline-modal-close></div>
+    <section class="tas-modal-panel" role="dialog" aria-modal="true" aria-labelledby="saveTimelineTitle">
+      <div class="tas-modal-head">
+        <div>
+          <span>SAVE TIMELINE</span>
+          <h3 id="saveTimelineTitle">保存录像</h3>
+        </div>
+        <button class="tas-modal-close" type="button" data-timeline-modal-close aria-label="关闭">×</button>
+      </div>
+      <div class="tas-modal-body">
+        <label class="tas-modal-field" for="saveDirectory">
+          <span>目录</span>
+          <span class="tas-path-row">
+            <input id="saveDirectory" type="text" spellcheck="false" autocomplete="off">
+            <button class="btn tiny ghost" id="saveBrowse" type="button">选择路径</button>
+          </span>
+        </label>
+        <label class="tas-modal-field" for="saveName">
+          <span>文件名</span>
+          <input id="saveName" type="text" spellcheck="false" autocomplete="off">
+        </label>
+        <label class="tas-check" for="saveEvents">
+          <input id="saveEvents" type="checkbox" checked>
+          <span>保留帧事件数据</span>
+        </label>
+      </div>
+      <div class="tas-modal-actions">
+        <button class="btn tiny ghost" type="button" data-timeline-modal-close>取消</button>
+        <button class="btn tiny primary" id="confirmSaveTimeline" type="button">保存</button>
+      </div>
+    </section>
+  </div>
+
+  <div class="tas-modal" id="loadTimelineModal" hidden>
+    <div class="tas-modal-scrim" data-timeline-modal-close></div>
+    <section class="tas-modal-panel" role="dialog" aria-modal="true" aria-labelledby="loadTimelineTitle">
+      <div class="tas-modal-head">
+        <div>
+          <span>LOAD TIMELINE</span>
+          <h3 id="loadTimelineTitle">加载录像</h3>
+        </div>
+        <button class="tas-modal-close" type="button" data-timeline-modal-close aria-label="关闭">×</button>
+      </div>
+      <div class="tas-modal-body">
+        <label class="tas-modal-field" for="loadDirectory">
+          <span>目录</span>
+          <span class="tas-path-row">
+            <input id="loadDirectory" type="text" spellcheck="false" autocomplete="off">
+            <button class="btn tiny ghost" id="loadBrowse" type="button">选择路径</button>
+          </span>
+        </label>
+        <label class="tas-modal-field" for="loadFilter">
+          <span>筛选</span>
+          <input id="loadFilter" type="text" spellcheck="false" autocomplete="off" placeholder="关卡、文件名、种子">
+        </label>
+        <label class="tas-modal-field" for="loadTimelineFile">
+          <span>录像</span>
+          <select id="loadTimelineFile" size="8"></select>
+        </label>
+        <p class="tas-modal-note" id="loadTimelineMeta">选择录像文件</p>
+      </div>
+      <div class="tas-modal-actions">
+        <button class="btn tiny ghost" type="button" data-timeline-modal-close>取消</button>
+        <button class="btn tiny primary" id="confirmLoadTimeline" type="button">回放</button>
+      </div>
+    </section>
+  </div>
+
+  <div class="tas-modal" id="actionModal" hidden>
+    <div class="tas-modal-scrim" data-action-close></div>
+    <section class="tas-modal-panel" role="dialog" aria-modal="true" aria-labelledby="actionModalTitle">
+      <div class="tas-modal-head">
+        <div>
+          <span id="actionModalKicker">BETTERBATTLE</span>
+          <h3 id="actionModalTitle">确认操作</h3>
+        </div>
+        <button class="tas-modal-close" type="button" data-action-close aria-label="关闭">×</button>
+      </div>
+      <div class="tas-modal-body">
+        <p class="tas-modal-warning" id="actionModalMessage"></p>
+      </div>
+      <div class="tas-modal-actions">
+        <button class="btn tiny ghost" type="button" data-action-close>取消</button>
+        <button class="btn tiny primary" id="actionModalOk" type="button">确认</button>
+      </div>
+    </section>
+  </div>
+
+  <div id="toasts" class="toasts"></div>
+</body>
+</html>

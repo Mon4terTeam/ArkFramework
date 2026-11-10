@@ -1,0 +1,1012 @@
+:root {
+  --tas-operate: #8ff0c0;
+  --tas-skill: #b69cff;
+  --tas-withdraw: #ff7b72;
+  --tas-combat: #e6c15c;
+  --tas-resource: #72d5e6;
+  --tas-row-step: 52px;
+  --tas-node-height: 38px;
+}
+
+#page-timeline.active {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.tas-timeline-panel {
+  display: flex;
+  min-height: 0;
+  flex: 3 1 0;
+  flex-direction: column;
+  padding-bottom: 9px;
+}
+
+.tas-timeline-head > div {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+
+.tas-timeline-panel .panel-head h3 {
+  font-size: 14px;
+}
+
+.tas-timeline-status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.tas-timeline-status > span {
+  font-size: 11px;
+}
+
+.tas-segment-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-right: 9px;
+  border-right: 1px solid var(--line);
+}
+
+.tas-header-action {
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font: 10px/1 var(--font-mono);
+}
+
+.tas-header-action:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--text-2);
+}
+
+.tas-header-action.danger {
+  border-color: color-mix(in srgb, var(--red) 58%, var(--line));
+  background: color-mix(in srgb, var(--red) 8%, transparent);
+  color: #ff8f87;
+}
+
+.tas-header-action.danger:hover:not(:disabled) {
+  border-color: var(--red);
+  background: color-mix(in srgb, var(--red) 15%, transparent);
+  color: #ffb1ac;
+}
+
+.tas-view-badge {
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--line));
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  color: var(--accent);
+  font: 650 9.5px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+}
+
+.tas-view-badge:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.tas-view-badge.is-overview {
+  border-color: var(--line-strong);
+  background: transparent;
+  color: var(--text-2);
+}
+
+.tas-subtitle {
+  color: var(--muted);
+  font: 10px/1.3 var(--font-mono);
+  letter-spacing: 0.03em;
+}
+
+.tas-transport {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  padding: 9px 0 10px;
+  border-top: 1px solid var(--line);
+}
+
+.tas-transport .btn.tiny {
+  height: 27px;
+  padding: 0 8px;
+  font-size: 11.5px;
+}
+
+.tas-play {
+  width: 32px;
+  padding: 0;
+}
+
+.tas-split {
+  margin-left: 4px;
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent);
+}
+
+.tas-split span {
+  font: 12px/1 var(--font-mono);
+}
+
+.tas-split:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.tas-frame-readout {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--muted);
+  font: 11px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.tas-frame-readout strong {
+  color: var(--accent);
+  font-size: 24px;
+  font-weight: 550;
+  letter-spacing: -0.04em;
+}
+
+.tas-jump {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.tas-jump input {
+  width: 68px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  outline: none;
+  background: var(--surface-2);
+  color: var(--text);
+  font: 11px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.tas-jump input:focus {
+  border-color: var(--line-strong);
+}
+
+.tas-jump input::-webkit-inner-spin-button {
+  display: none;
+}
+
+.tas-tree-wrap {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.tas-tree-scroll {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.tas-tree-canvas {
+  display: flex;
+  min-width: 100%;
+  min-height: 100%;
+  flex-direction: column;
+}
+
+.tas-tree {
+  position: relative;
+  min-height: 180px;
+  flex: 1;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  cursor: zoom-in;
+}
+
+.tas-tree.is-overview {
+  cursor: default;
+}
+
+.tas-connectors {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.tas-tree-nodes {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  pointer-events: none;
+}
+
+.tas-node {
+  --branch-color: var(--accent);
+  position: absolute;
+  display: block;
+  height: var(--tas-node-height);
+  min-width: 2px;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid #323b42;
+  background: #191e22;
+  color: var(--text-2);
+  text-align: left;
+  pointer-events: auto;
+}
+
+.tas-node:not(.is-active) {
+  opacity: 0.88;
+}
+
+.tas-node::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  background: var(--branch-color);
+  content: "";
+}
+
+.tas-node:hover {
+  border-color: var(--line-strong);
+  background: #1d2328;
+  color: var(--text);
+}
+
+.tas-node.is-active {
+  z-index: 2;
+  border-color: var(--accent);
+  background: #1b2226;
+  box-shadow: inset 0 0 0 1px rgba(143, 240, 192, 0.1);
+  color: var(--text);
+}
+
+.tas-node-head {
+  position: absolute;
+  right: 9px;
+  bottom: 4px;
+  left: 9px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.tas-node-head code {
+  color: var(--branch-color);
+  font: 650 10.5px/1 var(--font-mono);
+}
+
+.tas-node-head strong {
+  overflow: hidden;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
+.tas-node-edge {
+  position: absolute;
+  top: 4px;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  color: var(--muted);
+  font: 9px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.tas-node-edge.is-start {
+  left: 9px;
+}
+
+.tas-node-edge.is-end {
+  right: 9px;
+  text-align: right;
+}
+
+.tas-node-edge b {
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+.tas-node-edge time {
+  color: var(--faint);
+}
+
+.tas-node.is-active .tas-node-edge {
+  top: 6px;
+  gap: 6px;
+}
+
+.tas-node.is-active .tas-node-edge.is-end {
+  align-items: baseline;
+}
+
+.tas-node.is-active .tas-node-edge b {
+  color: var(--text);
+  font-size: 11px;
+  letter-spacing: 0.01em;
+}
+
+.tas-node.is-active .tas-node-edge time {
+  font-size: 9px;
+}
+
+.tas-node.is-active .tas-node-head {
+  top: 24px;
+  right: 96px;
+  bottom: auto;
+  left: 9px;
+}
+
+.tas-node.is-active .tas-node-head code {
+  font-size: 11px;
+}
+
+.tas-node.is-active .tas-node-head strong {
+  font-size: 12.5px;
+}
+
+.tas-tree.is-overview .tas-node.is-active .tas-node-edge {
+  top: 4px;
+  flex-direction: row;
+  gap: 5px;
+}
+
+.tas-tree.is-overview .tas-node.is-active .tas-node-edge.is-end {
+  align-items: baseline;
+}
+
+.tas-tree.is-overview .tas-node.is-active .tas-node-edge b {
+  font-size: 8.5px;
+}
+
+.tas-tree.is-overview .tas-node.is-active .tas-node-edge time {
+  font-size: 8px;
+}
+
+.tas-tree.is-overview .tas-node.is-active .tas-node-head {
+  top: auto;
+  right: 9px;
+  bottom: 4px;
+  left: 9px;
+}
+
+.tas-tree.is-overview .tas-node.is-active .tas-node-head strong {
+  font-size: 10px;
+}
+
+.tas-tree.is-overview .tas-node.is-active .tas-node-head code {
+  font-size: 9.5px;
+}
+
+.tas-tree.is-overview .tas-node-events {
+  display: none;
+}
+
+.tas-tree.is-overview .tas-node.is-active .tas-node-frame-pin {
+  top: 20px;
+  bottom: 4px;
+}
+
+.tas-tree.is-overview .tas-node-frame-label {
+  display: none;
+}
+
+.tas-tree.is-overview .tas-node-edge time {
+  display: none;
+}
+
+.tas-node-events {
+  position: absolute;
+  right: 9px;
+  bottom: 8px;
+  left: 9px;
+  display: grid;
+  height: 40px;
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  gap: 2px;
+  pointer-events: none;
+}
+
+.tas-node-lane {
+  --lane-color: var(--muted);
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--lane-color) 10%, transparent),
+    color-mix(in srgb, var(--lane-color) 4%, transparent)
+  );
+}
+
+.tas-node-lane::before {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  left: 0;
+  height: 1px;
+  background: color-mix(in srgb, var(--lane-color) 28%, transparent);
+  content: "";
+}
+
+.tas-node-lane.is-operation {
+  --lane-color: var(--tas-operate);
+}
+
+.tas-node-lane.is-combat {
+  --lane-color: var(--tas-combat);
+}
+
+.tas-node-lane.is-resource {
+  --lane-color: var(--tas-resource);
+}
+
+.tas-node-frame-pin {
+  position: absolute;
+  z-index: 3;
+  top: 40px;
+  bottom: 8px;
+  width: 1px;
+  background: var(--accent);
+  box-shadow: 0 0 5px rgba(143, 240, 192, 0.32);
+  pointer-events: none;
+}
+
+.tas-node-frame-pin::before {
+  position: absolute;
+  top: -1px;
+  left: -3px;
+  width: 7px;
+  height: 5px;
+  background: var(--accent);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  content: "";
+}
+
+.tas-node-frame-label {
+  position: absolute;
+  z-index: 4;
+  top: 23px;
+  right: 7px;
+  padding: 2px 4px;
+  background: #1b2226;
+  color: var(--accent);
+  font: 9.5px/1 var(--font-mono);
+  pointer-events: none;
+}
+
+.tas-node-event {
+  --event-color: var(--muted);
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  width: 3px;
+  background: var(--event-color);
+  box-shadow: 0 0 4px color-mix(in srgb, var(--event-color) 55%, transparent);
+  opacity: 0.96;
+  pointer-events: auto;
+  transform: translateX(-50%);
+}
+
+.tas-node-event:hover,
+.tas-node-event.is-snap-target {
+  z-index: 2;
+  width: 5px;
+  box-shadow:
+    0 0 0 1px rgba(240, 244, 246, 0.5),
+    0 0 8px color-mix(in srgb, var(--event-color) 75%, transparent);
+}
+
+.tas-node-split {
+  position: absolute;
+  z-index: 5;
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--accent);
+  background: var(--surface-2);
+  transform: translate(-50%, -50%) rotate(45deg);
+  pointer-events: none;
+}
+
+.tas-cursor {
+  position: absolute;
+  z-index: 8;
+  left: 0;
+  width: 1px;
+  background: var(--accent);
+  box-shadow: 0 0 7px rgba(143, 240, 192, 0.28);
+  pointer-events: none;
+}
+
+.tas-cursor::before {
+  position: absolute;
+  top: 0;
+  left: -4px;
+  width: 9px;
+  height: 6px;
+  background: var(--accent);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  content: "";
+}
+
+.tas-cursor span {
+  position: absolute;
+  top: 7px;
+  left: 6px;
+  padding: 2px 4px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font: 700 10px/1 var(--font-mono);
+  white-space: nowrap;
+}
+
+.tas-timeline-foot {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 6px;
+  color: var(--muted);
+  font: 9.5px/1.2 var(--font-mono);
+}
+
+.tas-lane-legend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font: 9px/1 var(--font-mono);
+}
+
+.tas-lane-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tas-lane-legend i {
+  width: 10px;
+  height: 3px;
+  background: var(--muted);
+}
+
+.tas-lane-legend .operation {
+  background: var(--tas-operate);
+}
+
+.tas-lane-legend .combat {
+  background: var(--tas-combat);
+}
+
+.tas-lane-legend .resource {
+  background: var(--tas-resource);
+}
+
+.tas-foot-note {
+  color: var(--faint);
+}
+
+.tas-lower-grid {
+  display: grid;
+  min-height: 0;
+  flex: 2 1 0;
+  grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.75fr);
+  gap: 12px;
+}
+
+.tas-event-panel,
+.tas-detail-panel {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  margin-bottom: 0;
+}
+
+.tas-filters {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin: -2px 0 8px;
+}
+
+.tas-filters .chip {
+  background: transparent;
+  cursor: pointer;
+}
+
+.tas-filters .chip:hover {
+  border-color: var(--line-strong);
+  color: var(--text-2);
+}
+
+.tas-filters .chip.hot {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent);
+}
+
+.tas-filters .chip b {
+  color: var(--faint);
+  font-weight: 500;
+}
+
+.tas-event-list {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  border-top: 1px solid var(--line);
+}
+
+.tas-event-row {
+  --event-color: var(--muted);
+  display: grid;
+  width: 100%;
+  min-height: 34px;
+  grid-template-columns: 52px 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px;
+  border-bottom: 1px solid var(--line);
+  color: var(--text-2);
+  text-align: left;
+}
+
+.tas-event-row:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.tas-event-row.is-selected {
+  background: var(--surface-2);
+  box-shadow: inset 2px 0 0 var(--event-color);
+}
+
+.tas-event-frame {
+  color: var(--muted);
+  font: 9px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.tas-event-swatch {
+  width: 20px;
+  height: 4px;
+  background: var(--event-color);
+}
+
+.tas-event-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tas-event-meta {
+  color: var(--muted);
+  font: 8px/1.2 var(--font-mono);
+  white-space: nowrap;
+}
+
+#eventDetail {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tas-detail-body {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding-top: 2px;
+  border-top: 1px solid var(--line);
+}
+
+.tas-detail-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 0 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tas-detail-top strong {
+  color: var(--text);
+  font: 550 24px/1 var(--font-mono);
+  letter-spacing: -0.04em;
+}
+
+.tas-detail-top span {
+  color: var(--muted);
+  font: 9px/1 var(--font-mono);
+}
+
+.tas-detail-category {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 7px;
+  color: var(--muted);
+  font: 9px/1 var(--font-mono);
+}
+
+.tas-detail-category i {
+  width: 24px;
+  height: 4px;
+  background: var(--event-color);
+}
+
+.tas-detail-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.tas-detail-description {
+  margin: 6px 0 10px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.tas-detail-lines {
+  display: grid;
+}
+
+.tas-detail-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.tas-detail-line strong {
+  color: var(--text-2);
+  font: 10px/1.2 var(--font-mono);
+  text-align: right;
+}
+
+.tas-detail-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.tas-detail-empty {
+  padding: 30px 12px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+}
+
+.tas-modal {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+.tas-modal[hidden] {
+  display: none;
+}
+
+.tas-modal-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(3, 6, 8, 0.76);
+  backdrop-filter: blur(5px);
+}
+
+.tas-modal-panel {
+  position: relative;
+  width: min(420px, calc(100vw - 40px));
+  border: 1px solid var(--line-strong);
+  background:
+    linear-gradient(180deg, rgba(27, 34, 38, 0.98), rgba(12, 15, 17, 0.99)),
+    var(--surface);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.58);
+  animation: tas-modal-in 150ms ease-out;
+}
+
+.tas-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 15px 17px 13px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tas-modal-head span {
+  color: var(--muted);
+  font: 650 8px/1 var(--font-mono);
+  letter-spacing: 0.12em;
+}
+
+.tas-modal-head h3 {
+  margin: 5px 0 0;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.tas-modal-panel.is-danger .tas-modal-head span {
+  color: var(--red);
+}
+
+.tas-modal-close {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  color: var(--muted);
+  font: 400 16px/1 var(--font-ui);
+}
+
+.tas-modal-close:hover {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.tas-modal-body {
+  padding: 16px 17px;
+}
+
+.tas-modal-field {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.tas-modal-field input {
+  width: 100%;
+  height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--line-strong);
+  outline: none;
+  background: var(--surface-2);
+  color: var(--text);
+  font: 11px/1 var(--font-mono);
+}
+
+.tas-modal-field input:focus {
+  border-color: var(--accent);
+}
+
+.tas-modal-field input::placeholder {
+  color: var(--faint);
+}
+
+.tas-modal-note {
+  margin: 9px 0 0;
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.tas-delete-target {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 0 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tas-delete-target strong {
+  color: var(--text);
+  font: 600 18px/1 var(--font-mono);
+}
+
+.tas-delete-target span {
+  color: var(--muted);
+  font: 9px/1 var(--font-mono);
+}
+
+.tas-modal-warning {
+  margin: 13px 0 0;
+  color: var(--text-2);
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.tas-modal-warning b {
+  color: var(--red);
+  font: 650 12px/1 var(--font-mono);
+}
+
+.tas-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 11px 17px;
+  border-top: 1px solid var(--line);
+}
+
+.tas-modal-actions .btn.danger {
+  border-color: var(--red);
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+  color: #ffaaa4;
+  font-weight: 650;
+}
+
+.tas-modal-actions .btn.danger:hover:not(:disabled) {
+  border-color: #ffaaa4;
+  background: color-mix(in srgb, var(--red) 20%, transparent);
+  color: #ffd0cc;
+}
+
+.tas-rewind-view {
+  min-height: 440px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: 0.14em;
+}
+
+.tas-rewind-view[hidden] {
+  display: none;
+}
+
+#page-timeline.is-rewinding .tas-timeline-panel {
+  display: none;
+}
+
+@keyframes tas-modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (max-width: 1120px) {
+  .tas-lower-grid {
+    grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+  }
+
+  .tas-event-meta {
+    display: none;
+  }
+}

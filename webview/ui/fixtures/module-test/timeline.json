@@ -1,0 +1,26 @@
+{
+  "name": "Module panel live capture",
+  "stage": "Obt/Weekly/level_weekly_armor_5",
+  "stageId": "wk_armor_5",
+  "capturedAt": "2026-11-03T21:18:06.3385631+08:00",
+  "game": "E:\\Games\\ArkTest\\Arknights\\Arknights.exe",
+  "logicalFps": 30,
+  "catalog": "catalog.json",
+  "profiles": "module-deployed_profiles.json",
+  "snapshots": [
+    {
+      "file": "module-deployed_snapshot.json",
+      "frame": 272,
+      "seconds": 9.07,
+      "label": "澄闪已部署 · 模组 Lv.3",
+      "units": 1,
+      "cards": 4,
+      "buffs": 4,
+      "activeSkills": [],
+      "cost": 9,
+      "paused": true,
+      "state": 2,
+      "result": "战斗已暂停"
+    }
+  ]
+}

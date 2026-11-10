@@ -1,0 +1,16 @@
+{
+  "source": "PRTS Wiki",
+  "page": "https://prts.wiki/w/PRTS:文件一览/干员精英2立绘",
+  "note": "Resources belong to Hypergryph and the original artists. Used here for local development previews.",
+  "operators": [
+    { "id": "char_4244_tocka", "name": "冻河" },
+    { "id": "char_4247_oxi", "name": "塔露拉" },
+    { "id": "char_1050_chen3", "name": "赤刃明霄陈" },
+    { "id": "char_4202_haruka", "name": "遥" },
+    { "id": "char_1015_aglna2", "name": "予愿安洁莉娜" },
+    { "id": "char_377_gdglow", "name": "澄闪" },
+    { "id": "char_2023_ling", "name": "令" },
+    { "id": "char_1045_svash2", "name": "凛御银灰" },
+    { "id": "char_1029_yato2", "name": "麒麟R夜刀" }
+  ]
+}
