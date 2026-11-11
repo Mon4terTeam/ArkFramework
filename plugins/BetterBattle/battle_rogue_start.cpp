@@ -1,6 +1,230 @@
 #include "battle_helpers.h"
 
+#include <cstdio>
+
 namespace ark::better_battle {
+namespace {
+
+std::string ratio_text(double value) {
+    char text[32]{};
+    std::snprintf(text, sizeof(text), "%.6g", value);
+    return text;
+}
+
+BattleStart::OuterBuffSpec global_buff_spec(
+    const char* inner_key,
+    std::vector<std::pair<std::string, std::string>> fields) {
+    BattleStart::OuterBuffSpec spec;
+    spec.key = "global_buff_normal";
+    spec.fields.push_back({"key", inner_key});
+    for (auto& field : fields) {
+        spec.fields.push_back({std::move(field.first), std::move(field.second)});
+    }
+    return spec;
+}
+
+BattleStart::OuterBuffSpec direct_buff_spec(
+    const char* key,
+    std::vector<std::pair<std::string, std::string>> fields) {
+    BattleStart::OuterBuffSpec spec;
+    spec.key = key;
+    for (auto& field : fields) {
+        spec.fields.push_back({std::move(field.first), std::move(field.second)});
+    }
+    return spec;
+}
+
+constexpr const char* kRogue5ExcludedEnemies =
+    "enemy_1196_msfyin|enemy_1196_msfyin_2|enemy_1198_msfshu|"
+    "enemy_1198_msfshu_2|enemy_1200_msfjin|enemy_1200_msfjin_2|"
+    "enemy_1202_msfzhi|enemy_1202_msfzhi_2|enemy_1204_msfhu|"
+    "enemy_1204_msfhu_2|enemy_1206_msfpin|enemy_1206_msfpin_2|"
+    "enemy_1208_msfji|enemy_1208_msfji_2|enemy_1210_msfden|"
+    "enemy_1210_msfden_2|enemy_10059_cjgfod|enemy_10060_cjbfod|"
+    "enemy_2121_dyspl2|enemy_2101_dyspll";
+constexpr const char* kRogue5AtkExcludedEnemies =
+    "enemy_10061_cjglon|enemy_10062_cjblon";
+constexpr const char* kRogue5TokenEnemies =
+    "enemy_2101_dyspll|enemy_2121_dyspl2";
+constexpr const char* kRogue5LevelTypes[] = {"NORMAL", "ELITE", "BOSS"};
+constexpr const char* kRogue6WeatherZones[] = {
+    "zone_1", "zone_2", "zone_3", "zone_4", "zone_5", "zone_6",
+};
+constexpr double kRogue6WeatherProb[] = {
+    0.1, 0.2, 0.3, 0.3, 0.3, 0.3,
+};
+
+constexpr double kRogue2ZoneAtkPercent[] = {
+    0.0,  1.0,  2.0,  3.0,  4.0,  5.0,  6.0,  7.0,  8.0,  9.0,
+    10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 20.0, 20.0, 20.0,
+};
+constexpr double kRogue2ZoneHpPercent[] = {
+    0.0,  1.0,  2.0,  3.0,  4.0,  5.0,  6.0,  7.0,  8.0,  9.0,
+    10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 20.0, 25.0, 30.0,
+};
+constexpr double kRogue3ZonePercent[] = {
+    0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0,
+    4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0,
+};
+constexpr double kRogue4ZonePercent[] = {
+    0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 5.0, 6.0,
+    7.0, 8.0, 10.0, 13.0, 16.0, 20.0, 21.0, 22.0, 22.0,
+};
+constexpr double kRogue5ZonePercent[] = {
+    0.0, 0.0, 0.0, 0.0,
+    1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0,
+    10.0, 11.0, 12.0, 13.0,
+    15.0, 18.0, 21.0, 25.0,
+};
+constexpr double kRogue6ZonePercent[] = {
+    0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 5.0,
+    6.0, 7.0, 8.0, 10.0, 12.0, 16.0, 20.0, 25.0,
+};
+
+struct ZoneGrowthTable {
+    const char* topic;
+    const double* atk_percent;
+    const double* hp_percent;
+    int max_grade;
+};
+
+constexpr ZoneGrowthTable kZoneGrowthTables[] = {
+    {"rogue_2", kRogue2ZoneAtkPercent, kRogue2ZoneHpPercent, 18},
+    {"rogue_3", kRogue3ZonePercent, kRogue3ZonePercent, 15},
+    {"rogue_4", kRogue4ZonePercent, kRogue4ZonePercent, 18},
+    {"rogue_5", kRogue5ZonePercent, kRogue5ZonePercent, 18},
+    {"rogue_6", kRogue6ZonePercent, kRogue6ZonePercent, 16},
+};
+
+const ZoneGrowthTable* find_zone_growth(const std::string& topic) {
+    for (const ZoneGrowthTable& table : kZoneGrowthTables) {
+        if (topic == table.topic) {
+            return &table;
+        }
+    }
+    return nullptr;
+}
+
+void append_zone_growth(std::vector<BattleStart::OuterBuffSpec>& specs,
+                        const std::string& topic, int grade, int zone) {
+    const ZoneGrowthTable* table = find_zone_growth(topic);
+    if (!table) {
+        return;
+    }
+    const int grade_index = std::clamp(grade, 0, table->max_grade);
+    const double atk_percent = table->atk_percent[grade_index];
+    const double hp_percent = table->hp_percent[grade_index];
+    if (atk_percent <= 0.0 && hp_percent <= 0.0) {
+        return;
+    }
+    const int layers = std::max(zone, 1);
+    for (int layer = 0; layer < layers; ++layer) {
+        if (atk_percent > 0.0) {
+            std::vector<std::pair<std::string, std::string>> fields = {
+                {"atk", ratio_text(1.0 + atk_percent * 0.01)}};
+            if (topic == "rogue_5") {
+                fields.push_back(
+                    {"selector.enemy_exclude", kRogue5AtkExcludedEnemies});
+            } else if (topic == "rogue_6") {
+                fields.push_back({"selector.profession", "none"});
+            }
+            specs.push_back(global_buff_spec("enemy_atk_down", std::move(fields)));
+        }
+        if (hp_percent > 0.0) {
+            std::vector<std::pair<std::string, std::string>> fields = {
+                {"max_hp", ratio_text(1.0 + hp_percent * 0.01)}};
+            if (topic == "rogue_5") {
+                fields.push_back(
+                    {"selector.enemy_exclude", kRogue5ExcludedEnemies});
+            } else if (topic == "rogue_6") {
+                fields.push_back({"selector.profession", "none"});
+            }
+            specs.push_back(global_buff_spec("enemy_max_hp_down", std::move(fields)));
+        }
+    }
+}
+
+void append_rogue5_fixed(std::vector<BattleStart::OuterBuffSpec>& specs,
+                         int grade) {
+    const int safe_grade = std::max(grade, 0);
+    if (safe_grade >= 4) {
+        specs.push_back(global_buff_spec(
+            "enemy_max_hp_down",
+            {{"max_hp", "1.5"}, {"selector.enemy", kRogue5TokenEnemies}}));
+        for (const char* level_type : kRogue5LevelTypes) {
+            specs.push_back(global_buff_spec(
+                "enemy_max_hp_down",
+                {{"max_hp", "1.4"},
+                 {"selector.enemy_level_type", level_type},
+                 {"selector.enemy_exclude", kRogue5ExcludedEnemies}}));
+        }
+        if (safe_grade >= 5) {
+            for (const char* level_type : kRogue5LevelTypes) {
+                specs.push_back(global_buff_spec(
+                    "enemy_damage_resistance[inf]",
+                    {{"damage_resistance", "0.1"},
+                     {"selector.enemy_level_type", level_type}}));
+            }
+        }
+    }
+    if (safe_grade < 7) {
+        const std::string weaken = ratio_text(0.3 + 0.1 * safe_grade);
+        specs.push_back(global_buff_spec(
+            "rogue_5_enemy_sp_zone_attri_up",
+            {{"atk", weaken}, {"max_hp", "1"}, {"def", "1"}}));
+        specs.push_back(global_buff_spec(
+            "rogue_5_enemy_sp_zone_attri_up",
+            {{"max_hp", weaken}, {"atk", "1"}, {"def", "1"}}));
+    }
+}
+
+void append_rogue6_fixed(std::vector<BattleStart::OuterBuffSpec>& specs,
+                         int grade) {
+    const int safe_grade = std::max(grade, 0);
+    if (safe_grade >= 2) {
+        for (std::size_t index = 0;
+             index < std::size(kRogue6WeatherZones); ++index) {
+            specs.push_back(direct_buff_spec(
+                "weather_prob_up",
+                {{"prob", ratio_text(kRogue6WeatherProb[index])},
+                 {"zone_id", kRogue6WeatherZones[index]}}));
+        }
+    }
+    if (safe_grade >= 3) {
+        specs.push_back(direct_buff_spec(
+            "force_blur_type_until_count",
+            {{"node_type", "FINAL"}, {"count", "1"}}));
+    }
+    if (safe_grade >= 4) {
+        specs.push_back(direct_buff_spec(
+            "unlock_node", {{"node", "BATTLE_SAVAGE"}}));
+    }
+    if (safe_grade >= 5) {
+        for (const char* level_type : kRogue5LevelTypes) {
+            specs.push_back(global_buff_spec(
+                "enemy_max_hp_down",
+                {{"max_hp", "1.3"},
+                 {"selector.enemy_level_type", level_type}}));
+        }
+    }
+    if (safe_grade >= 7) {
+        specs.push_back(direct_buff_spec(
+            "immediate_cost",
+            {{"id", "rogue_6_max_weight"}, {"count", "2"}}));
+    }
+}
+
+void append_rogue_difficulty(std::vector<BattleStart::OuterBuffSpec>& specs,
+                             const std::string& topic, int grade, int zone) {
+    append_zone_growth(specs, topic, grade, zone);
+    if (topic == "rogue_5") {
+        append_rogue5_fixed(specs, grade);
+    } else if (topic == "rogue_6") {
+        append_rogue6_fixed(specs, grade);
+    }
+}
+
+}  // namespace
 
 void LocalBattle::rogue_start(const BattleStart& start) {
     if (start.stage.empty() || start.path.empty()) {
@@ -734,8 +958,20 @@ void LocalBattle::rogue_start(const BattleStart& start) {
             collection_add(runtime_, outer_buffs, buff);
             ++applied_outer;
         }
+        std::vector<BattleStart::OuterBuffSpec> outer_specs =
+            start.outer_buff_specs;
+        if (find_zone_growth(start.stage) || start.stage == "rogue_5") {
+            append_rogue_difficulty(outer_specs, start.stage, start.grade,
+                                    start.zone);
+            log(kLogInfo,
+                "肉鸽难度 Buff: topic=" + start.stage + " grade=" +
+                    std::to_string(start.grade) + " zone=" +
+                    std::to_string(start.zone) + " specs=" +
+                    std::to_string(outer_specs.size() -
+                                   start.outer_buff_specs.size()));
+        }
         std::size_t applied_outer_specs = 0;
-        for (const auto& spec : start.outer_buff_specs) {
+        for (const auto& spec : outer_specs) {
             void* buff = box_zero(runtime_, buff_class);
             Root buff_root(runtime_, buff);
             void* key_value = runtime_.string_new(spec.key.c_str());
@@ -777,10 +1013,19 @@ void LocalBattle::rogue_start(const BattleStart& start) {
         runtime_.set<void*>(input, "outerBuffs", outer_buffs);
         runtime_.set<void*>(input, "relicBuffs", relic_buffs);
         runtime_.set<void*>(input, "extraBuffs", extra_buffs);
-        runtime_.set<int>(input, "hp",
-                          10 + std::max(start.hp_bonus, 0));
-        runtime_.set<int>(input, "maxHp",
-                          10 + std::max(start.max_hp_bonus, 0));
+        int initial_hp = 10 + std::max(start.hp_bonus, 0);
+        int initial_max_hp = 10 + std::max(start.max_hp_bonus, 0);
+        if (start.stage == "rogue_6") {
+            const int base_life = start.grade >= 1 ? 6 : 8;
+            initial_hp = base_life + std::max(start.hp_bonus, 0);
+            initial_max_hp = base_life + std::max(start.max_hp_bonus, 0);
+            if (start.grade >= 10) {
+                initial_hp = std::max(1, initial_hp - 2);
+                initial_max_hp = std::max(1, initial_max_hp - 2);
+            }
+        }
+        runtime_.set<int>(input, "hp", initial_hp);
+        runtime_.set<int>(input, "maxHp", initial_max_hp);
         runtime_.set<int>(input, "shield", std::max(start.shield_bonus, 0));
         runtime_.set_value(input, "meta", meta);
 
@@ -875,7 +1120,6 @@ void LocalBattle::rogue_start(const BattleStart& start) {
         finish_bypassed_ = false;
         finish_home_pending_.store(false, std::memory_order_release);
         local_battle_active_.store(true, std::memory_order_release);
-        battle_session_closed_.store(false, std::memory_order_release);
         activate_pending_timeline();
         clear_static_cache();
         perf_ = PerfStats{};

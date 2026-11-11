@@ -76,8 +76,6 @@ void LocalBattle::frame() {
             install_preprocess_global_buff_hook();
         }
     }
-    process_request_file();
-
     const std::uint64_t now = GetTickCount64();
     if (now >= next_record_flush_tick_) {
         next_record_flush_tick_ = now + 500;
@@ -927,6 +925,37 @@ std::string LocalBattle::build_web_json(const BattleSnapshot& snap) const {
         for (const UnitInfo::BuffInfo& buff : enemy.buffs) {
             buffs.push_back(buff_json(buff));
         }
+        json panel = json::array();
+        for (const AttributeBreakdown& row : enemy.panel) {
+            json modifiers = json::array();
+            for (const AttributeModifierInfo& modifier : row.modifiers) {
+                modifiers.push_back({
+                    {"kind", modifier.kind},
+                    {"key", modifier.key},
+                    {"source", modifier.source},
+                    {"class_name", modifier.class_name},
+                    {"uid", modifier.uid},
+                    {"addition", number(modifier.addition)},
+                    {"multiplier", number(modifier.multiplier)},
+                    {"final_addition", number(modifier.final_addition)},
+                    {"final_scaler", number(modifier.final_scaler)},
+                });
+            }
+            panel.push_back({
+                {"attribute", row.attribute},
+                {"raw", number(row.raw)},
+                {"addition", number(row.addition)},
+                {"multiplier", number(row.multiplier)},
+                {"final_addition", number(row.final_addition)},
+                {"final_scaler", number(row.final_scaler)},
+                {"predicted", number(row.predicted)},
+                {"actual", number(row.actual)},
+                {"min", number(row.min_value)},
+                {"max", number(row.max_value)},
+                {"has_max", row.has_max},
+                {"modifiers", std::move(modifiers)},
+            });
+        }
         enemies.push_back({
             {"serial", enemy.serial},
             {"id", enemy.id},
@@ -950,6 +979,7 @@ std::string LocalBattle::build_web_json(const BattleSnapshot& snap) const {
             {"giant_boss", enemy.giant_boss},
             {"skills", std::move(skills)},
             {"buffs", std::move(buffs)},
+            {"panel", std::move(panel)},
         });
     }
     root["enemies"] = std::move(enemies);
@@ -1334,6 +1364,8 @@ void LocalBattle::on_global_update(void* self, void* method) {
         original(self, method);
     }
     const std::uint64_t tick_started = perf_now_us();
+    battle->process_request_file();
+    battle->schedule_next_work();
     if (battle->finish_home_pending_.exchange(false, std::memory_order_acq_rel)) {
         if (!battle->route_home_from_finish()) {
             battle->finish_home_pending_.store(true, std::memory_order_release);

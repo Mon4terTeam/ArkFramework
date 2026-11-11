@@ -876,7 +876,6 @@ void LocalBattle::start_battle(const BattleStart& start) {
         finish_bypassed_ = false;
         finish_home_pending_.store(false, std::memory_order_release);
         local_battle_active_.store(true, std::memory_order_release);
-        battle_session_closed_.store(false, std::memory_order_release);
         activate_pending_timeline();
         clear_static_cache();
         perf_ = PerfStats{};

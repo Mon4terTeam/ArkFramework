@@ -18,6 +18,8 @@ void ClassIds::resolve(il2cpp::Runtime& runtime) {
     }
     battle_object = runtime.find("Torappu.Battle", "BObject");
     buff = runtime.find("Torappu.Battle", "Buff");
+    attributes = runtime.find("Torappu.Battle", "Attributes");
+    attribute_type = runtime.find("Torappu", "AttributeType");
     battle_in_out = runtime.find("Torappu.Battle", "BattleInOut");
     battle_stage_info = runtime.find("Torappu.Battle", "BattleStageInfo");
     game_mode_meta = runtime.find("Torappu.Battle", "GameModeMeta");

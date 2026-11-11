@@ -293,6 +293,7 @@ void LocalBattle::run_command(const Command& command) {
     {"resume", &LocalBattle::cmd_resume},
     {"leave", &LocalBattle::cmd_leave},
     {"enemy-focus", &LocalBattle::cmd_enemy_focus},
+    {"panel", &LocalBattle::cmd_panel},
     {"enemy-outline-test", &LocalBattle::cmd_enemy_outline_test},
     {"enemy-profile", &LocalBattle::cmd_enemy_profile},
     {"enemy-waves", &LocalBattle::cmd_enemy_waves},
@@ -615,6 +616,14 @@ void LocalBattle::cmd_rogue_start(Args& args) {
         if (option.rfind("--seed=", 0) == 0) {
             try {
                 start.rogue_seed = std::stoi(option.substr(7));
+            } catch (...) {
+            }
+            continue;
+        }
+        if (option.rfind("--zone=", 0) == 0) {
+            try {
+                start.zone =
+                    std::clamp(std::stoi(option.substr(7)), 1, 99);
             } catch (...) {
             }
             continue;

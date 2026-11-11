@@ -203,6 +203,31 @@ ArkFramework/build-cmake/dist/rogue_player_data.json
 --outerbuff=enemy_attribute_mul||move_speed=-0.15
 ```
 
+## 黑流树海难度 1..7 实测
+
+真实局 `ro6_b_4`、`modeGrade=7`、当前 zone 为 5 时，`unKeepBuff` 中除
+zone 成长外还包含以下固定难度项：
+
+```text
+grade 2: weather_prob_up
+         zone_1=0.1, zone_2=0.2, zone_3..6=0.3
+grade 3: force_blur_type_until_count
+         node_type=FINAL, count=1
+grade 4: unlock_node
+         node=BATTLE_SAVAGE
+grade 5: enemy_max_hp_down
+         max_hp=1.3, selector.enemy_level_type=NORMAL/ELITE/BOSS
+grade 7: immediate_cost
+         id=rogue_6_max_weight, count=2
+```
+
+grade 1 的“初始目标生命上限-2”不落在战斗外置 Buff，而是生命初值：
+rogue_6 的 `NORMAL` 初始值为 8（grade 0）/ 6（grade 1 起）。
+grade 6 的“实托邦中期 + 方针”由气象档位选择处理，不再额外生成固定
+`outerBuff`。zone 成长在 grade 7 为每层 `1.03`，实测为 5 层
+`1.03^5` 的全局 Buff。原始样本见
+`build-cmake/dist/rogue_captures/capture-437079453.json`。
+
 ## 黑流地脉（RO6 `weather_1`）
 
 **已实测（早期 `_a`，真实局）**
@@ -592,6 +617,35 @@ global_buff_normal
 
 原始样本见 `_captures/rogue_wrath_sinong_20261106/` 和
 `_captures/rogue_wrath_sinong_awakened_20261106/`。
+
+### 岁时“未建”实测
+
+真实界园战斗（`ro5_n_4_3`、`modeGrade=8`）中同时存在
+`rogue_5_wrath_2_b` 和 `rogue_5_wrath_5_b`（未建·真切）。未建对应的战斗
+条目是：
+
+```text
+global_buff_normal
+  key=rogue_5_character_deploy_lose_sp
+  sp=0.2
+  prob=1
+  selector.profession=warrior|sniper|tank|medic|support|caster|special|pioneer
+```
+
+运行时实例为 `GBuffNormal`。因此朦胧/真切/入髓三档分别使用同一链路，
+`sp=0.1/0.2/0.3`；Web 配置已启用 `rogue_5_wrath_5_a/_b/_c`。醒觉 `_d`
+是“技力消耗 -5%”的独立效果，实测为：
+
+```text
+char_skill_cost_mul
+  scale=0.95
+  selector.profession=warrior|sniper|tank|medic|support|caster|special|pioneer
+```
+
+Web 配置已按该链路启用 `rogue_5_wrath_5_d`。
+
+原始样本见 `build-cmake/dist/rogue_captures/capture-431073140.json` 和
+`global-buffs-431072828.json`；醒觉样本见 `capture-432036953.json`。
 
 申铸醒觉 `rogue_5_wrath_8_d` 可从普通档实测链路推导：普通档已确认
 `enemy_attribute_mul` 使用 `selector.tag=animated`，醒觉只把同一化物目标改为

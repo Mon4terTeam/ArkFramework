@@ -1217,6 +1217,7 @@ void LocalBattle::refresh_enemies(void* controller, BattleSnapshot& snapshot) {
                                   perf_.buff_misses, info.buffs, nullptr);
             } catch (...) {
             }
+            read_attribute_panel(entry.object, info);
             snapshot.enemies.push_back(std::move(info));
         } catch (...) {
         }

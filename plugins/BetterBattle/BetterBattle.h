@@ -118,6 +118,42 @@ struct RogueContextInfo {
     std::vector<RogueRelicInfo> relics;
 };
 
+struct RogueBattleMetaInfo {
+    bool captured = false;
+    bool input_ready = false;
+    bool local = false;
+    std::string topic_id;
+    std::string battle_id;
+    std::string stage_path;
+    std::string node_type;
+    std::string node_type_string;
+    std::string pending_index;
+    std::string capture_source;
+    std::string capture_file;
+    int mode = -1;
+    int grade = -1;
+    int equivalent_grade = -1;
+    int difficulty = -1;
+    int diff_group = -1;
+    int seed = -1;
+    int gold = -1;
+    int remain_population = -1;
+    int chest_count = -1;
+    int gold_trap_count = -1;
+    int san = -1;
+    int scrap_count = -1;
+    int scrap_limit = -1;
+    int scrap_value = -1;
+    int zone_type = -1;
+    int node_type_value = -1;
+    int pending_type = -1;
+    int unkeep_buff_count = 0;
+    bool is_practise = false;
+    bool upload_battle_log = false;
+    std::string unkeep_buffs_json;
+    std::string relic_inventory_json;
+};
+
 struct BuffStaticInfo {
     std::string key;
     std::string template_key;
@@ -281,6 +317,33 @@ struct EnemySkillDefinition {
     double initial_cooldown = 0;
 };
 
+struct AttributeModifierInfo {
+    std::string kind;
+    std::string key;
+    std::string source;
+    std::string class_name;
+    std::uint32_t uid = 0;
+    double addition = 0;
+    double multiplier = 0;
+    double final_addition = 0;
+    double final_scaler = 1;
+};
+
+struct AttributeBreakdown {
+    std::string attribute;
+    double raw = 0;
+    double addition = 0;
+    double multiplier = 0;
+    double final_addition = 0;
+    double final_scaler = 1;
+    double predicted = 0;
+    double actual = 0;
+    double min_value = 0;
+    double max_value = 0;
+    bool has_max = false;
+    std::vector<AttributeModifierInfo> modifiers;
+};
+
 struct EnemyInfo {
     std::uint32_t serial = 0;
     std::string id;
@@ -304,6 +367,7 @@ struct EnemyInfo {
     bool giant_boss = false;
     std::vector<EnemySkillInfo> skills;
     std::vector<UnitInfo::BuffInfo> buffs;
+    std::vector<AttributeBreakdown> panel;
 };
 
 struct EnemyIdentity {
@@ -550,6 +614,8 @@ struct BattleScene {
     int player_side = 0;
     bool side_ready = false;
     bool launched_by_us = false;
+    bool rogue = false;
+    bool rogue_checked = false;
 };
 
 struct GameModeConfig {
@@ -593,6 +659,7 @@ struct BattleStart {
     std::vector<OuterBuffSpec> outer_buff_specs;
     int mode = 0;
     int grade = 0;
+    int zone = 1;
     int growth = 0;
     int hp_bonus = 0;
     int max_hp_bonus = 0;
@@ -602,6 +669,7 @@ struct BattleStart {
     int scrap_limit = -1;
     int rogue_seed = 12345;
     bool official_extra = false;
+    std::string rogue_display_json;
     GameModeConfig game_mode;
 };
 
@@ -638,6 +706,7 @@ struct ReplayMeta {
     bool rogue = false;
     GameModeConfig game_mode;
     BattleStart start;
+    RogueBattleMetaInfo rogue_capture;
     std::int64_t created_unix_ms = 0;
 };
 
@@ -819,6 +888,7 @@ struct TimelineSession {
     };
 
     BattleStart start;
+    RogueBattleMetaInfo rogue_capture;
     StageInfo stage;
     SeedState seed;
     std::string source;
@@ -915,6 +985,7 @@ private:
     void refresh_enemies(void* controller, BattleSnapshot& snapshot);
     void refresh_global_buffs(void* controller, BattleSnapshot& snapshot);
     void refresh_rogue_context(void* controller, BattleSnapshot& snapshot);
+    void update_timeline_rogue_display(const BattleSnapshot& snapshot);
     const EnemyProfile& enemy_profile(const std::string& id);
     void enemy_profile_probe(const std::string& id);
     void read_enemy_waves(void* controller, BattleSnapshot& snapshot);
@@ -955,6 +1026,9 @@ private:
     void rogue_net_capture(const std::string& text);
     void capture_player_delta(void* delta);
     void maybe_queue_pending_capture();
+    bool detect_rogue_game_mode(void* controller);
+    bool capture_rogue_battle_meta(void* controller);
+    void maybe_queue_auto_rogue_capture(void* controller);
     void rogue_capture(const std::string& text);
     void rogue_dump_battle();
     void rogue_dump_global_buffs();
@@ -1150,6 +1224,7 @@ private:
     void cmd_resume(Args& args);
     void cmd_leave(Args& args);
     void cmd_enemy_focus(Args& args);
+    void cmd_panel(Args& args);
     void cmd_enemy_outline_test(Args& args);
     void cmd_enemy_profile(Args& args);
     void cmd_enemy_waves(Args& args);
@@ -1170,6 +1245,7 @@ private:
     void ensure_card_profile(void* data, const CardInfo& card);
     void ensure_profile_from_data(void* data, std::uint32_t key,
                                   const std::string& operator_id);
+    void read_attribute_panel(void* entity, EnemyInfo& info);
     void export_asset(const std::string& kind, const std::string& id);
     std::string build_web_json(const BattleSnapshot& snapshot) const;
     std::string build_profiles_json() const;
@@ -1219,7 +1295,6 @@ private:
     std::string last_pending_capture_index_;
     std::atomic<bool> finish_home_pending_{false};
     std::atomic<bool> local_battle_active_{false};
-    std::atomic<bool> battle_session_closed_{true};
     bool finish_bypassed_ = false;
     std::uint64_t next_connect_tick_ = 0;
     std::uint64_t next_refresh_tick_ = 0;
@@ -1332,8 +1407,11 @@ private:
     std::mutex web_payload_mutex_;
     std::string last_web_json_;
     std::string last_timeline_json_;
+    std::uint64_t last_rogue_display_tick_ = 0;
 
     bool rogue_capture_queued_ = false;
+    std::uint64_t rogue_auto_capture_revision_ =
+        std::numeric_limits<std::uint64_t>::max();
     std::uint32_t rogue_context_revision_ = 0xFFFFFFFFu;
     bool rogue_context_ready_ = false;
     RogueContextInfo rogue_context_cache_;
@@ -1359,6 +1437,7 @@ private:
     std::vector<EnemyWave> enemy_wave_plan_cache_;
     std::uint32_t focused_enemy_uid_ = 0;
     std::uint64_t focused_enemy_until_ = 0;
+    std::uint32_t panel_target_uid_ = 0;
     std::unique_ptr<il2cpp::Runtime::Root> focused_enemy_root_;
     std::unique_ptr<il2cpp::Runtime::Root> focused_animator_root_;
     void* focused_animator_ = nullptr;
@@ -1402,6 +1481,7 @@ private:
     std::int64_t& timeline_created_unix_ms_ = timeline_.created_unix_ms;
     std::vector<SquadSlot>& timeline_squad_ = timeline_.start.squad;
     BattleStart& timeline_start_ = timeline_.start;
+    RogueBattleMetaInfo& timeline_rogue_capture_ = timeline_.rogue_capture;
     bool& timeline_rogue_ = timeline_.start.rogue;
     bool& timeline_tas_allowed_ = timeline_.tas_allowed;
     int& timeline_seed_observed_ = timeline_.seed.observed;

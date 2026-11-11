@@ -154,6 +154,39 @@ void LocalBattle::maybe_queue_pending_capture() {
     }
 }
 
+void LocalBattle::maybe_queue_auto_rogue_capture(void* controller) {
+    if (!controller) {
+        return;
+    }
+    std::uint64_t revision = 0;
+    {
+        std::lock_guard lock(record_mutex_);
+        if (scene_.controller != controller || !scene_.rogue ||
+            !timeline_rogue_capture_.captured ||
+            !timeline_rogue_capture_.input_ready ||
+            timeline_rogue_capture_.local) {
+            return;
+        }
+        revision = scene_.revision;
+        if (rogue_auto_capture_revision_ == revision) {
+            return;
+        }
+        rogue_auto_capture_revision_ = revision;
+    }
+    {
+        std::lock_guard lock(mutex_);
+        if (std::any_of(pending_.begin(), pending_.end(),
+                        [](const Command& command) {
+                            return command.name == "rogue-capture";
+                        })) {
+            return;
+        }
+        pending_.push_back(Command{"rogue-capture", {}});
+    }
+    log(kLogInfo, "检测到肉鸽战斗，已排队自动 rogue-capture revision=" +
+                      std::to_string(revision));
+}
+
 void LocalBattle::queue_global_buff_capture(void* list) {
     if (!list) {
         return;
@@ -378,7 +411,10 @@ void LocalBattle::capture_global_buff_list(void* list) {
             }
         }
     }
+    const bool local_capture =
+        local_battle_active_.load(std::memory_order_acquire);
     document["buffs"] = std::move(buffs);
+    document["local"] = local_capture;
     const std::string json = document.dump();
     {
         std::lock_guard lock(global_buff_mutex_);
@@ -387,7 +423,8 @@ void LocalBattle::capture_global_buff_list(void* list) {
         last_global_buffs_tick_ = captured_at;
     }
 
-    if (rogue_global_capture_.load(std::memory_order_acquire)) {
+    if (rogue_global_capture_.load(std::memory_order_acquire) ||
+        !local_capture) {
         try {
             const std::filesystem::path directory =
                 std::filesystem::path(host_.root_directory) / "rogue_captures";

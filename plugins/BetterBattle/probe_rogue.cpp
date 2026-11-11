@@ -351,6 +351,17 @@ void LocalBattle::rogue_capture(const std::string& text) {
             }
         }
         document["handlers"] = std::move(handlers);
+        {
+            std::lock_guard lock(record_mutex_);
+            if (timeline_rogue_capture_.captured) {
+                document["battle_id"] = timeline_rogue_capture_.battle_id;
+                document["stage_path"] = timeline_rogue_capture_.stage_path;
+                document["grade"] = timeline_rogue_capture_.grade;
+                document["difficulty"] =
+                    timeline_rogue_capture_.difficulty;
+                document["seed"] = timeline_rogue_capture_.seed;
+            }
+        }
         const std::string json = document.dump() + "\n";
 
         const std::filesystem::path directory =
@@ -374,6 +385,16 @@ void LocalBattle::rogue_capture(const std::string& text) {
             if (!file) {
                 throw std::runtime_error("肉鸽机制捕获写入失败: " +
                                          path.string());
+            }
+        }
+        {
+            std::lock_guard lock(record_mutex_);
+            if (timeline_rogue_capture_.captured &&
+                timeline_rogue_capture_.local == local_capture) {
+                timeline_rogue_capture_.capture_source = source;
+                timeline_rogue_capture_.capture_file = file_path.string();
+                timeline_dirty_.store(true, std::memory_order_release);
+                ++timeline_revision_;
             }
         }
         publish_result("已捕获 " + topic + " 的 " +

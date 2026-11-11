@@ -251,7 +251,6 @@ void LocalBattle::set_paused(bool paused) {
 
 void LocalBattle::close_battle_session() {
     cancel_timeline_fast_forward();
-    battle_session_closed_.store(true, std::memory_order_release);
     remove_replay_hook();
     replay_active_.store(false, std::memory_order_release);
     replay_dispatched_ = 0;

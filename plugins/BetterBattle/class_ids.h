@@ -17,6 +17,8 @@ struct ClassIds {
     void* enemy_db = nullptr;
     void* battle_object = nullptr;
     void* buff = nullptr;
+    void* attributes = nullptr;
+    void* attribute_type = nullptr;
     void* battle_in_out = nullptr;
     void* battle_stage_info = nullptr;
     void* game_mode_meta = nullptr;

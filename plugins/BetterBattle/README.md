@@ -32,7 +32,7 @@ cmake --build build-cmake --target BetterBattleWeb
 
 ```text
 start <stageId> <id:level:evolve:potential:skill:skillLevel,...>
-rogue-start <topicId> <stageId> <roster> [mode] [grade] [growth]
+rogue-start <topicId> <stageId> <roster> [mode] [grade] [growth] [--zone=<1-99>]
 rogue-catalog [outputFile]
 rogue-net-capture start|stop
 rogue-capture

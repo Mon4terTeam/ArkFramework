@@ -362,6 +362,572 @@ CapturedStageMetadata capture_stage_metadata(il2cpp::Runtime& runtime) {
     return result;
 }
 
+Json blackboard_entries_to_json(
+    const std::vector<BuffBlackboardEntry>& entries) {
+    Json out = Json::array();
+    for (const BuffBlackboardEntry& entry : entries) {
+        Json item = Json::object();
+        item["key"] = entry.key;
+        item["value"] = entry.value;
+        if (!entry.value_str.empty()) {
+            item["value_str"] = entry.value_str;
+        }
+        out.push_back(std::move(item));
+    }
+    return out;
+}
+
+Json global_buff_group_to_json(const GlobalBuffGroupInfo& group) {
+    Json buffs = Json::array();
+    for (const GlobalBuffEntryInfo& buff : group.buffs) {
+        Json item = Json::object();
+        item["key"] = buff.key;
+        item["template"] = buff.template_key;
+        item["override"] = buff.override_key;
+        item["max_stack"] = buff.max_stack;
+        item["priority"] = buff.priority;
+        item["life"] = buff.life_time;
+        item["blackboard"] = buff.blackboard;
+        item["blackboard_entries"] =
+            blackboard_entries_to_json(buff.blackboard_entries);
+        buffs.push_back(std::move(item));
+    }
+    Json out = Json::object();
+    out["key"] = group.key;
+    out["source"] = group.source;
+    out["uid"] = group.uid;
+    out["layer_mask"] = group.layer_mask;
+    out["blackboard"] = group.blackboard;
+    out["blackboard_entries"] =
+        blackboard_entries_to_json(group.blackboard_entries);
+    out["buffs"] = std::move(buffs);
+    return out;
+}
+
+Json rogue_context_to_json(const RogueContextInfo& rogue) {
+    Json relics = Json::array();
+    for (const RogueRelicInfo& relic : rogue.relics) {
+        Json item = Json::object();
+        item["id"] = relic.id;
+        item["layer"] = relic.layer;
+        item["buff_keys"] = relic.buff_keys;
+        relics.push_back(std::move(item));
+    }
+    Json out = Json::object();
+    out["valid"] = rogue.valid;
+    out["topic"] = rogue.topic_id;
+    out["relics"] = std::move(relics);
+    return out;
+}
+
+Json rogue_buff_list_to_json(il2cpp::Runtime& runtime, void* list) {
+    Json out = Json::array();
+    if (!list) {
+        return out;
+    }
+    Root list_root(runtime, list);
+    int count = 0;
+    try {
+        count = runtime.count(list);
+    } catch (...) {
+        return out;
+    }
+    for (int index = 0; index < count; ++index) {
+        void* buff = nullptr;
+        try {
+            buff = runtime.at(list, index);
+        } catch (...) {
+            continue;
+        }
+        if (!buff) {
+            continue;
+        }
+        Root buff_root(runtime, buff);
+        void* buff_class = runtime.object_class(buff);
+        Json item = Json::object();
+        item["key"] = read_string_field(runtime, buff, buff_class, "key");
+        void* board = nullptr;
+        std::vector<BuffBlackboardEntry> entries;
+        if (read_field_deep(runtime, buff, buff_class, "blackboard", &board) &&
+            board) {
+            read_blackboard_entries(runtime, board, entries);
+        }
+        item["blackboard"] = format_buff_blackboard(entries);
+        item["blackboard_entries"] = blackboard_entries_to_json(entries);
+        out.push_back(std::move(item));
+    }
+    return out;
+}
+
+Json relic_inventory_to_json(il2cpp::Runtime& runtime, void* inventory) {
+    Json out = Json::array();
+    if (!inventory) {
+        return out;
+    }
+    Root inventory_root(runtime, inventory);
+    void* relics = nullptr;
+    if (!read_field_deep(runtime, inventory,
+                         runtime.object_class(inventory), "relic", &relics) ||
+        !relics) {
+        return out;
+    }
+    Root relics_root(runtime, relics);
+    const std::vector<DictionaryPair> pairs =
+        read_dictionary_pairs(runtime, relics, 512);
+    for (const DictionaryPair& pair : pairs) {
+        if (!pair.value) {
+            continue;
+        }
+        Root value_root(runtime, pair.value);
+        void* relic_class = runtime.object_class(pair.value);
+        std::string index =
+            read_string_field(runtime, pair.value, relic_class, "index");
+        if (index.empty() && pair.key) {
+            index = runtime.string(pair.key);
+        }
+        Json item = Json::object();
+        item["index"] = index;
+        item["id"] =
+            read_string_field(runtime, pair.value, relic_class, "id");
+        int count = 0;
+        read_field_deep(runtime, pair.value, relic_class, "count", &count);
+        item["count"] = count;
+        int layer = 0;
+        read_field_deep(runtime, pair.value, relic_class, "layer", &layer);
+        item["layer"] = layer;
+        int ts = 0;
+        read_field_deep(runtime, pair.value, relic_class, "ts", &ts);
+        item["ts"] = ts;
+        int used = 0;
+        read_field_deep(runtime, pair.value, relic_class, "used", &used);
+        item["used"] = used;
+        out.push_back(std::move(item));
+    }
+    return out;
+}
+
+}  // namespace
+
+bool LocalBattle::detect_rogue_game_mode(void* controller) {
+    if (!controller) {
+        return false;
+    }
+    try {
+        int mode_type = -1;
+        void* game_mode = nullptr;
+        try {
+            game_mode = runtime_.get_object(controller, "m_gameMode");
+        } catch (...) {
+        }
+        if (game_mode) {
+            const std::string class_name =
+                runtime_.klass_name(runtime_.object_class(game_mode));
+            if (class_name.find("RoguelikeGameMode") != std::string::npos) {
+                return true;
+            }
+            try {
+                std::uint8_t value = 0;
+                if (read_field_deep(runtime_, game_mode,
+                                    runtime_.object_class(game_mode),
+                                    "modeType", &value)) {
+                    mode_type = value;
+                }
+            } catch (...) {
+            }
+        }
+        if (mode_type < 0) {
+            const GameModeConfig cached = capture_game_mode_metadata(runtime_);
+            if (cached.valid) {
+                mode_type = cached.mode_type;
+            }
+        }
+        if (mode_type < 0) {
+            return false;
+        }
+
+        void* mode_class = classes_.game_mode_meta;
+        if (!mode_class) {
+            mode_class = runtime_.find("Torappu.Battle", "GameModeMeta");
+        }
+        void* mode_type_field =
+            mode_class ? find_field_deep(runtime_, mode_class, "modeType")
+                       : nullptr;
+        if (mode_type_field) {
+            void* enum_class = runtime_.class_from_type(
+                runtime_.field_type(mode_type_field));
+            if (enum_class &&
+                mode_type == runtime_.enum_value(enum_class, "ROGUELIKE")) {
+                return true;
+            }
+        }
+
+    } catch (...) {
+    }
+    return false;
+}
+
+bool LocalBattle::capture_rogue_battle_meta(void* controller) {
+    if (!controller) {
+        return false;
+    }
+    {
+        std::lock_guard lock(record_mutex_);
+        if (scene_.controller != controller) {
+            return false;
+        }
+        if (timeline_rogue_capture_.captured &&
+            timeline_rogue_capture_.input_ready) {
+            return true;
+        }
+        if (scene_.rogue_checked && !scene_.rogue) {
+            return true;
+        }
+    }
+
+    if (!detect_rogue_game_mode(controller)) {
+        scene_.rogue_checked = true;
+        scene_.rogue = false;
+        return false;
+    }
+    scene_.rogue = true;
+    scene_.rogue_checked = true;
+
+    RogueBattleMetaInfo info;
+    info.captured = true;
+    info.local = local_battle_active_.load(std::memory_order_acquire);
+
+    try {
+        void* game_mode = runtime_.get_object(controller, "m_gameMode");
+        if (game_mode) {
+            Root game_mode_root(runtime_, game_mode);
+            void* input = runtime_.get_object(game_mode, "m_input");
+            if (input) {
+                Root input_root(runtime_, input);
+                void* input_class = runtime_.object_class(input);
+                std::vector<unsigned char> meta_bytes;
+                void* meta_class = nullptr;
+                if (read_value_field_copy(runtime_, input, input_class, "meta",
+                                          meta_bytes, &meta_class) &&
+                    meta_class) {
+                    info.topic_id = read_struct_string(
+                        runtime_, meta_class, meta_bytes, "topicId");
+                    info.gold = read_struct_int(runtime_, meta_class,
+                                                meta_bytes, "gold", -1);
+                    info.remain_population = read_struct_int(
+                        runtime_, meta_class, meta_bytes, "remainPopulation", -1);
+                    info.chest_count = read_struct_int(
+                        runtime_, meta_class, meta_bytes, "chestCnt", -1);
+                    info.gold_trap_count = read_struct_int(
+                        runtime_, meta_class, meta_bytes, "goldTrapCnt", -1);
+                    info.san = read_struct_int(runtime_, meta_class,
+                                               meta_bytes, "san", -1);
+                    info.mode = read_struct_int(runtime_, meta_class,
+                                               meta_bytes, "mode", -1);
+                    info.seed = read_struct_int(runtime_, meta_class,
+                                                meta_bytes, "seed", -1);
+                    info.zone_type = read_struct_int(
+                        runtime_, meta_class, meta_bytes, "zoneType", -1);
+                    info.node_type_value = read_struct_int(
+                        runtime_, meta_class, meta_bytes, "nodeType", -1);
+                    info.node_type_string = read_struct_string(
+                        runtime_, meta_class, meta_bytes, "nodeTypeString");
+                    info.scrap_count = read_struct_int(
+                        runtime_, meta_class, meta_bytes, "scrapInventoryCount",
+                        -1);
+                    info.scrap_limit = read_struct_int(
+                        runtime_, meta_class, meta_bytes, "scrapInventoryLimit",
+                        -1);
+                    info.scrap_value = read_struct_int(
+                        runtime_, meta_class, meta_bytes, "scrapInventoryValue",
+                        -1);
+                    info.input_ready = true;
+                }
+            }
+        }
+
+        const CapturedStageMetadata stage_info = capture_stage_metadata(runtime_);
+        info.stage_path = stage_info.stage_id;
+
+        try {
+            void* in_out_class =
+                runtime_.find("Torappu.Battle", "BattleInOut");
+            void* in_params_class =
+                in_out_class ? runtime_.nested(in_out_class, "InParams")
+                             : nullptr;
+            void* in_out =
+                in_out_class ? runtime_.singleton(in_out_class) : nullptr;
+            if (in_params_class && in_out) {
+                Root in_out_root(runtime_, in_out);
+                void* in_params = runtime_.get_object(
+                    in_out, "<input>k__BackingField");
+                if (in_params) {
+                    Root in_params_root(runtime_, in_params);
+                    info.battle_id = read_string_field(
+                        runtime_, in_params, in_params_class, "battleId");
+                    read_field_deep(runtime_, in_params, in_params_class,
+                                    "difficulty", &info.difficulty);
+                    read_field_deep(runtime_, in_params, in_params_class,
+                                    "diffGroup", &info.diff_group);
+                    read_field_deep(runtime_, in_params, in_params_class,
+                                    "isPractise", &info.is_practise);
+                    read_field_deep(runtime_, in_params, in_params_class,
+                                    "uploadBattleLog",
+                                    &info.upload_battle_log);
+                }
+            }
+        } catch (...) {
+        }
+
+        void* model = player_data_model();
+        if (model) {
+            Root model_root(runtime_, model);
+            void* rlv2 = nullptr;
+            read_field_deep(runtime_, model, runtime_.object_class(model),
+                            "rlv2", &rlv2);
+            if (rlv2) {
+                Root rlv2_root(runtime_, rlv2);
+                void* current = runtime_.get_object(rlv2, "current");
+                if (current) {
+                    Root current_root(runtime_, current);
+                    void* game = nullptr;
+                    read_field_deep(runtime_, current,
+                                    runtime_.object_class(current), "game",
+                                    &game);
+                    if (game) {
+                        Root game_root(runtime_, game);
+                        void* game_class = runtime_.object_class(game);
+                        const std::string theme = read_string_field(
+                            runtime_, game, game_class, "theme");
+                        if (!theme.empty()) {
+                            info.topic_id = theme;
+                        }
+                        read_field_deep(runtime_, game, game_class, "modeGrade",
+                                        &info.grade);
+                        read_field_deep(runtime_, game, game_class,
+                                        "equivalentGrade",
+                                        &info.equivalent_grade);
+                        read_field_deep(runtime_, game, game_class, "difficult",
+                                        &info.difficulty);
+                        if (info.grade < 0) {
+                            info.grade = info.equivalent_grade;
+                        }
+                    }
+                    void* inventory = nullptr;
+                    if (read_field_deep(runtime_, current,
+                                        runtime_.object_class(current),
+                                        "inventory", &inventory) &&
+                        inventory) {
+                        info.relic_inventory_json =
+                            relic_inventory_to_json(runtime_, inventory).dump();
+                    }
+                    void* player = nullptr;
+                    read_field_deep(runtime_, current,
+                                    runtime_.object_class(current), "player",
+                                    &player);
+                    if (player) {
+                        Root player_root(runtime_, player);
+                        void* pending = nullptr;
+                        read_field_deep(runtime_, player,
+                                        runtime_.object_class(player), "pending",
+                                        &pending);
+                        if (pending && runtime_.count(pending) > 0) {
+                            Root pending_root(runtime_, pending);
+                            void* event = runtime_.at(pending, 0);
+                            if (event) {
+                                Root event_root(runtime_, event);
+                                void* event_class = runtime_.object_class(event);
+                                read_field_deep(runtime_, event, event_class,
+                                                "type", &info.pending_type);
+                                info.pending_index = read_string_field(
+                                    runtime_, event, event_class, "index");
+                                void* content = nullptr;
+                                read_field_deep(runtime_, event, event_class,
+                                                "content", &content);
+                                if (content) {
+                                    Root content_root(runtime_, content);
+                                    void* battle = nullptr;
+                                    read_field_deep(
+                                        runtime_, content,
+                                        runtime_.object_class(content), "battle",
+                                        &battle);
+                                    if (battle) {
+                                        Root battle_root(runtime_, battle);
+                                        void* buffs = nullptr;
+                                        read_field_deep(
+                                            runtime_, battle,
+                                            runtime_.object_class(battle),
+                                            "unKeepBuff", &buffs);
+                                        if (buffs) {
+                                            Root buffs_root(runtime_, buffs);
+                                            info.unkeep_buff_count =
+                                                std::max(runtime_.count(buffs), 0);
+                                            info.unkeep_buffs_json =
+                                                rogue_buff_list_to_json(
+                                                    runtime_, buffs)
+                                                    .dump();
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } catch (const std::exception& error) {
+        log(kLogWarning, std::string("读取肉鸽战斗 meta 失败：") +
+                             error.what());
+    } catch (...) {
+        log(kLogWarning, "读取肉鸽战斗 meta 失败：未知异常");
+    }
+
+    {
+        std::lock_guard lock(record_mutex_);
+        if (scene_.controller != controller) {
+            return false;
+        }
+        timeline_rogue_capture_ = info;
+        if (timeline_stage_id_.empty() && !info.stage_path.empty()) {
+            timeline_stage_id_ = info.stage_path;
+        }
+        const bool preserve_local_start = info.local && timeline_rogue_;
+        if (!preserve_local_start) {
+            if (timeline_start_.stage.empty() || !info.topic_id.empty()) {
+                timeline_start_.stage = info.topic_id;
+            }
+            if (!info.stage_path.empty()) {
+                timeline_start_.path = info.stage_path;
+            }
+            timeline_start_.mode = info.mode;
+            timeline_start_.grade = info.grade;
+            timeline_start_.growth = -1;
+            timeline_start_.scrap_count = info.scrap_count;
+            timeline_start_.scrap_limit = info.scrap_limit;
+            timeline_start_.rogue_seed = info.seed;
+            timeline_start_.official_extra = true;
+        }
+        timeline_rogue_ = true;
+        timeline_dirty_.store(true, std::memory_order_release);
+        ++timeline_revision_;
+    }
+    log(kLogInfo, "自动识别肉鸽战斗 topic=" +
+                      (info.topic_id.empty() ? std::string("<unknown>")
+                                             : info.topic_id) +
+                      " battleId=" +
+                      (info.battle_id.empty() ? std::string("<unknown>")
+                                              : info.battle_id) +
+                      " pending=" + std::to_string(info.pending_type) +
+                      " buffs=" + std::to_string(info.unkeep_buff_count));
+    return true;
+}
+
+void LocalBattle::update_timeline_rogue_display(
+    const BattleSnapshot& snapshot) {
+    if (!snapshot.rogue.valid && snapshot.rogue.relics.empty() &&
+        snapshot.global_buffs.empty()) {
+        return;
+    }
+    const std::uint64_t now = GetTickCount64();
+    if (now < last_rogue_display_tick_ ||
+        now - last_rogue_display_tick_ < 250) {
+        return;
+    }
+    last_rogue_display_tick_ = now;
+
+    RogueBattleMetaInfo capture;
+    {
+        std::lock_guard lock(record_mutex_);
+        if (!scene_.rogue && !timeline_rogue_) {
+            return;
+        }
+        capture = timeline_rogue_capture_;
+    }
+
+    Json display = Json::object();
+    Json rogue_json = rogue_context_to_json(snapshot.rogue);
+    if (snapshot.rogue.topic_id.empty() && !capture.topic_id.empty()) {
+        rogue_json["topic"] = capture.topic_id;
+    }
+    display["rogue"] = std::move(rogue_json);
+    Json capture_json = Json::object();
+    capture_json["captured"] = capture.captured;
+    capture_json["input_ready"] = capture.input_ready;
+    capture_json["local"] = capture.local;
+    capture_json["topic_id"] = capture.topic_id;
+    capture_json["battle_id"] = capture.battle_id;
+    capture_json["stage_path"] = capture.stage_path;
+    capture_json["node_type"] = capture.node_type;
+    capture_json["node_type_string"] = capture.node_type_string;
+    capture_json["pending_index"] = capture.pending_index;
+    capture_json["mode"] = capture.mode;
+    capture_json["grade"] = capture.grade;
+    capture_json["equivalent_grade"] = capture.equivalent_grade;
+    capture_json["difficulty"] = capture.difficulty;
+    capture_json["diff_group"] = capture.diff_group;
+    capture_json["seed"] = capture.seed;
+    capture_json["gold"] = capture.gold;
+    capture_json["remain_population"] = capture.remain_population;
+    capture_json["chest_count"] = capture.chest_count;
+    capture_json["gold_trap_count"] = capture.gold_trap_count;
+    capture_json["san"] = capture.san;
+    capture_json["scrap_count"] = capture.scrap_count;
+    capture_json["scrap_limit"] = capture.scrap_limit;
+    capture_json["scrap_value"] = capture.scrap_value;
+    capture_json["zone_type"] = capture.zone_type;
+    capture_json["node_type_value"] = capture.node_type_value;
+    capture_json["pending_type"] = capture.pending_type;
+    capture_json["unkeep_buff_count"] = capture.unkeep_buff_count;
+    capture_json["is_practise"] = capture.is_practise;
+    capture_json["upload_battle_log"] = capture.upload_battle_log;
+    display["capture"] = std::move(capture_json);
+    Json unkeep_buffs = Json::array();
+    if (!capture.unkeep_buffs_json.empty()) {
+        try {
+            unkeep_buffs = Json::parse(capture.unkeep_buffs_json);
+        } catch (...) {
+            unkeep_buffs = Json::array();
+        }
+    }
+    display["unkeep_buffs"] = std::move(unkeep_buffs);
+    Json relic_inventory = Json::array();
+    if (!capture.relic_inventory_json.empty()) {
+        try {
+            relic_inventory = Json::parse(capture.relic_inventory_json);
+        } catch (...) {
+            relic_inventory = Json::array();
+        }
+    }
+    display["relic_inventory"] = std::move(relic_inventory);
+    Json global_buffs = Json::array();
+    for (const GlobalBuffGroupInfo& group : snapshot.global_buffs) {
+        global_buffs.push_back(global_buff_group_to_json(group));
+    }
+    display["global_buffs"] = std::move(global_buffs);
+    std::string json = display.dump();
+
+    std::lock_guard lock(record_mutex_);
+    if (!scene_.rogue && !timeline_rogue_) {
+        return;
+    }
+    if (timeline_start_.rogue_display_json == json) {
+        return;
+    }
+    timeline_start_.rogue_display_json = std::move(json);
+    if (!scene_.launched_by_us && !timeline_rogue_capture_.local) {
+        timeline_start_.relics.clear();
+        for (const RogueRelicInfo& relic : snapshot.rogue.relics) {
+            timeline_start_.relics.emplace_back(relic.id, relic.layer);
+        }
+        if (timeline_rogue_capture_.gold >= 0) {
+            timeline_start_.gold_bonus = timeline_rogue_capture_.gold;
+        }
+    }
+    timeline_dirty_.store(true, std::memory_order_release);
+    ++timeline_revision_;
+}
+
+namespace {
+
 std::vector<SquadSlot> capture_squad_metadata(il2cpp::Runtime& runtime,
                                               void* controller) {
     std::vector<SquadSlot> result;
@@ -1063,6 +1629,7 @@ void LocalBattle::begin_timeline_session_from(
         timeline_nodes_.clear();
         recorded_pending_deploys_.clear();
         record_capture_suppressed_ = false;
+        timeline_rogue_capture_ = RogueBattleMetaInfo{};
         timeline_stage_id_ = stage_id;
         timeline_squad_ = std::move(squad);
         start.squad = timeline_squad_;
@@ -1320,11 +1887,17 @@ void LocalBattle::capture_timeline_metadata(void* controller) {
     if (!controller) {
         return;
     }
+    bool metadata_captured = false;
     {
         std::lock_guard lock(record_mutex_);
-        if (scene_.controller != controller || timeline_metadata_captured_) {
+        if (scene_.controller != controller) {
             return;
         }
+        metadata_captured = timeline_metadata_captured_;
+    }
+    if (metadata_captured) {
+        capture_rogue_battle_meta(controller);
+        return;
     }
     std::string level_id;
     try {
@@ -1338,42 +1911,45 @@ void LocalBattle::capture_timeline_metadata(void* controller) {
         capture_squad_metadata(runtime_, controller);
     const GameModeConfig captured_game_mode =
         capture_game_mode_metadata(runtime_);
-    std::lock_guard lock(record_mutex_);
-    if (scene_.controller != controller || timeline_metadata_captured_) {
-        return;
+    {
+        std::lock_guard lock(record_mutex_);
+        if (scene_.controller != controller || timeline_metadata_captured_) {
+            return;
+        }
+        if (!level_id.empty()) {
+            timeline_level_id_ = level_id;
+        }
+        if (!stage_info.level_id.empty()) {
+            timeline_level_id_ = stage_info.level_id;
+        }
+        if (!stage_info.stage_code.empty()) {
+            timeline_stage_code_ = stage_info.stage_code;
+        }
+        if (!stage_info.stage_name.empty()) {
+            timeline_stage_name_ = stage_info.stage_name;
+        }
+        if (!stage_info.stage_id.empty() &&
+            (timeline_source_ == "game" || timeline_stage_id_.empty())) {
+            timeline_stage_id_ = stage_info.stage_id;
+        }
+        if (timeline_squad_.empty() && !captured_squad.empty()) {
+            timeline_squad_ = captured_squad;
+        }
+        if (captured_game_mode.valid) {
+            timeline_game_mode_ = captured_game_mode;
+        }
+        if (timeline_start_.stage.empty()) {
+            timeline_start_.stage = timeline_stage_id_;
+        }
+        timeline_start_.squad = timeline_squad_;
+        timeline_start_.game_mode = timeline_game_mode_;
+        timeline_metadata_captured_ =
+            !timeline_stage_id_.empty() && !timeline_level_id_.empty() &&
+            !timeline_squad_.empty() && timeline_game_mode_.valid;
+        timeline_dirty_.store(true, std::memory_order_release);
+        ++timeline_revision_;
     }
-    if (!level_id.empty()) {
-        timeline_level_id_ = level_id;
-    }
-    if (!stage_info.level_id.empty()) {
-        timeline_level_id_ = stage_info.level_id;
-    }
-    if (!stage_info.stage_code.empty()) {
-        timeline_stage_code_ = stage_info.stage_code;
-    }
-    if (!stage_info.stage_name.empty()) {
-        timeline_stage_name_ = stage_info.stage_name;
-    }
-    if (!timeline_rogue_ && !stage_info.stage_id.empty() &&
-        (timeline_source_ == "game" || timeline_stage_id_.empty())) {
-        timeline_stage_id_ = stage_info.stage_id;
-    }
-    if (timeline_squad_.empty() && !captured_squad.empty()) {
-        timeline_squad_ = captured_squad;
-    }
-    if (captured_game_mode.valid) {
-        timeline_game_mode_ = captured_game_mode;
-    }
-    if (timeline_start_.stage.empty()) {
-        timeline_start_.stage = timeline_stage_id_;
-    }
-    timeline_start_.squad = timeline_squad_;
-    timeline_start_.game_mode = timeline_game_mode_;
-    timeline_metadata_captured_ =
-        !timeline_stage_id_.empty() && !timeline_level_id_.empty() &&
-        !timeline_squad_.empty() && timeline_game_mode_.valid;
-    timeline_dirty_.store(true, std::memory_order_release);
-    ++timeline_revision_;
+    capture_rogue_battle_meta(controller);
 }
 
 void LocalBattle::prepare_timeline_seed(void* controller) {
@@ -3185,6 +3761,7 @@ ReplayMeta LocalBattle::replay_meta_locked() const {
     meta.seed = timeline_seed_applied_ >= 0 ? timeline_seed_applied_
                                            : timeline_seed_observed_;
     meta.rogue = timeline_rogue_;
+    meta.rogue_capture = timeline_rogue_capture_;
     meta.game_mode = timeline_game_mode_;
     meta.start = timeline_start_;
     meta.start.squad = timeline_squad_;
@@ -3524,7 +4101,6 @@ void LocalBattle::start_replay_plan(
     try {
         cancel_timeline_fast_forward();
         clear_enemy_focus();
-        battle_session_closed_.store(false, std::memory_order_release);
         if (meta.stage_id.empty() || meta.start.stage.empty() ||
             meta.start.squad.empty()) {
             throw std::runtime_error("录像 meta 缺少关卡或编队");

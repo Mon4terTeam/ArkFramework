@@ -24,6 +24,10 @@ bool LocalBattle::adopt_scene(void* controller) {
         scene_.stage_pending = false;
     }
     scene_.launched_by_us = local_battle_active_.load(std::memory_order_acquire);
+    scene_.rogue = false;
+    scene_.rogue_checked = false;
+    rogue_auto_capture_revision_ =
+        std::numeric_limits<std::uint64_t>::max();
     card_scene_revision_ = 0;
     card_objects_ready_ = false;
     card_roots_.clear();
@@ -46,6 +50,7 @@ bool LocalBattle::adopt_scene(void* controller) {
     focused_outline_ = false;
     focused_enemy_uid_ = 0;
     focused_enemy_until_ = 0;
+    panel_target_uid_ = 0;
     focused_renderers_.clear();
     focused_materials_.clear();
     reset_world_sampling();
@@ -75,6 +80,10 @@ void LocalBattle::clear_scene() {
     scene_.player_side = 0;
     scene_.side_ready = false;
     scene_.launched_by_us = false;
+    scene_.rogue = false;
+    scene_.rogue_checked = false;
+    rogue_auto_capture_revision_ =
+        std::numeric_limits<std::uint64_t>::max();
     card_scene_revision_ = 0;
     card_objects_ready_ = false;
     card_roots_.clear();
@@ -89,6 +98,7 @@ void LocalBattle::clear_scene() {
     focused_outline_ = false;
     focused_enemy_uid_ = 0;
     focused_enemy_until_ = 0;
+    panel_target_uid_ = 0;
     focused_renderers_.clear();
     focused_materials_.clear();
     enemy_serials_.clear();

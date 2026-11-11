@@ -264,6 +264,7 @@ void parse_battle_start(const Json& value, BattleStart& start) {
     }
     optional_number(value, "mode", start.mode);
     optional_number(value, "grade", start.grade);
+    optional_number(value, "zone", start.zone);
     optional_number(value, "growth", start.growth);
     optional_number(value, "hp_bonus", start.hp_bonus);
     optional_number(value, "max_hp_bonus", start.max_hp_bonus);
@@ -273,6 +274,9 @@ void parse_battle_start(const Json& value, BattleStart& start) {
     optional_number(value, "scrap_limit", start.scrap_limit);
     optional_number(value, "rogue_seed", start.rogue_seed);
     optional_bool(value, "official_extra", start.official_extra);
+    if (const Json* display = find_value(value, "rogue_display")) {
+        start.rogue_display_json = display->dump();
+    }
 }
 
 void parse_game_mode(const Json& value, GameModeConfig& game_mode) {
@@ -666,6 +670,7 @@ Json battle_start_to_json(const BattleStart& start) {
     out["outer_buff_specs"] = std::move(outer_buff_specs);
     out["mode"] = start.mode;
     out["grade"] = start.grade;
+    out["zone"] = start.zone;
     out["growth"] = start.growth;
     out["hp_bonus"] = start.hp_bonus;
     out["max_hp_bonus"] = start.max_hp_bonus;
@@ -675,6 +680,13 @@ Json battle_start_to_json(const BattleStart& start) {
     out["scrap_limit"] = start.scrap_limit;
     out["rogue_seed"] = start.rogue_seed;
     out["official_extra"] = start.official_extra;
+    if (!start.rogue_display_json.empty()) {
+        try {
+            out["rogue_display"] = Json::parse(start.rogue_display_json);
+        } catch (...) {
+            out["rogue_display"] = Json::object();
+        }
+    }
     return out;
 }
 
@@ -763,6 +775,39 @@ Json meta_to_json(const ReplayMeta& meta) {
     out["seed_observed"] = meta.seed_observed;
     out["seed_applied"] = meta.seed_applied;
     out["rogue"] = meta.rogue;
+    out["rogue_capture"] = {
+        {"captured", meta.rogue_capture.captured},
+        {"input_ready", meta.rogue_capture.input_ready},
+        {"local", meta.rogue_capture.local},
+        {"topic_id", meta.rogue_capture.topic_id},
+        {"battle_id", meta.rogue_capture.battle_id},
+        {"stage_path", meta.rogue_capture.stage_path},
+        {"node_type", meta.rogue_capture.node_type},
+        {"node_type_string", meta.rogue_capture.node_type_string},
+        {"pending_index", meta.rogue_capture.pending_index},
+        {"capture_source", meta.rogue_capture.capture_source},
+        {"capture_file", meta.rogue_capture.capture_file},
+        {"mode", meta.rogue_capture.mode},
+        {"grade", meta.rogue_capture.grade},
+        {"equivalent_grade", meta.rogue_capture.equivalent_grade},
+        {"difficulty", meta.rogue_capture.difficulty},
+        {"diff_group", meta.rogue_capture.diff_group},
+        {"seed", meta.rogue_capture.seed},
+        {"gold", meta.rogue_capture.gold},
+        {"remain_population", meta.rogue_capture.remain_population},
+        {"chest_count", meta.rogue_capture.chest_count},
+        {"gold_trap_count", meta.rogue_capture.gold_trap_count},
+        {"san", meta.rogue_capture.san},
+        {"scrap_count", meta.rogue_capture.scrap_count},
+        {"scrap_limit", meta.rogue_capture.scrap_limit},
+        {"scrap_value", meta.rogue_capture.scrap_value},
+        {"zone_type", meta.rogue_capture.zone_type},
+        {"node_type_value", meta.rogue_capture.node_type_value},
+        {"pending_type", meta.rogue_capture.pending_type},
+        {"unkeep_buff_count", meta.rogue_capture.unkeep_buff_count},
+        {"is_practise", meta.rogue_capture.is_practise},
+        {"upload_battle_log", meta.rogue_capture.upload_battle_log},
+    };
     out["game_mode"] = {
         {"mode_type", meta.game_mode.mode_type},
         {"is_deterministic", meta.game_mode.is_deterministic},

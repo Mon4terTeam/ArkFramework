@@ -186,6 +186,11 @@ normalize(x) = x < 0 ? 1 + x : x
 边界进行逐步舍入和 clamp，插件不应假装自己能精确复刻；需要最终值时优先读取游戏
 实体或技能/属性系统的结果。
 
+如果需要在插件里展示“每个 Buff 落在哪个乘区”以及完整的
+`Ft * ((A + Dp) * max(0, 1 + Dt) + Fp)` 分解，参见
+`ArkFramework/docs/AttributePanel.md`。该文档同时说明了
+`Attributes.m_attributeModifiers` 的枚举方式和非 Buff 修饰器。
+
 修饰值不能跟随 Buff 的静态身份信息长期缓存。以 `tocka_s3[bonus]` 为例，同一个
 实例 UID 会随 15 秒衰减过程把 `ATK` 修饰从 `120%` 逐步降到 `8%`，但 Buff 对象的
 key、模板和来源不变。快照读取因此只缓存静态身份字段；已经显示修饰值或带触发间隔的
