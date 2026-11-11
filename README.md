@@ -149,4 +149,6 @@ ArkFrameworkLoader.exe --self-test [--method ...] # 在测试宿主中验证加�
 
 ## 许可证
 
-ArkFramework 以 [GNU 通用公共许可证 v3.0 或更高版本](LICENSE)（GPL-3.0-or-later）发布。第三方组件保留各自的 MIT / BSD 2-Clause 许可证，二者均与 GPL-3.0 兼容。
+- ArkFramework 框架本身 以 [GNU 通用公共许可证 v3.0 或更高版本](LICENSE) 发布，对框架二改需要遵循该协议。
+- 插件本身不受上述协议影响。
+- 第三方组件保留各自的 MIT / BSD 2-Clause 许可证，二者均与 GPL-3.0 兼容。
