@@ -54,24 +54,24 @@ docs/plugin-sdk.md      插件开发文档
 
 ## 构建
 
-需要 [Zig 0.15.2](https://ziglang.org/download/)（作为 C/C++ 编译器），放在 `PATH` 中或 `.tools\zig\ziglang\zig.exe`。
+当前发布构建使用 CMake + MinGW Makefiles，不依赖仓库内的 Zig 工具链。
 
-`build.ps1` / `package.ps1` 已包含本 fork 的组件；`run-test.ps1` 是本机测试脚本，不纳入提交。
+`build.ps1` 仍保留给 Zig 构建流程；`package.ps1` 现在独立使用 `build-package`，
+不会覆盖正在运行的游戏已映射的 DLL。`run-test.ps1` 是本机测试脚本，不纳入提交。
 
 ```powershell
-.\build.ps1                 # 运行测试并构建全部组件到 dist\
-.\build.ps1 -Target Tests   # 仅构建并运行自动测试
-.\build.ps1 -Target Plugin  # 仅重编插件（需先完成一次完整构建）
-.\build.ps1 -Release        # 无调试信息的发布构建，中间文件位于 build\release
-.\package.ps1               # 发布构建 + 全部测试，生成 package\ArkFramework
+.\package.ps1               # 构建并生成 package\ArkFramework
+.\package.ps1 -SkipBuild    # 复用 build-package\dist，仅重新组装发布目录
 ```
 
-核心运行中时 `ArkFramework.dll` 与 `ArkImGui.dll` 无法覆盖，可用 `-DistDirectory <目录>` 构建到其他目录；插件可直接覆盖后热重载。
+发布包只包含 `damage_meter`、`BetterBattle`、`web_bridge` 三个插件；
+`auto_login` 与 `BattleCheat` 明确排除。核心运行中时不要直接用
+`build-cmake` 重新链接核心，`package.ps1` 默认使用独立的 `build-package`。
 
-也可使用 CMake 3.22+ 与 Ninja。`cmake/zig-toolchain.cmake` 使用 Zig 自带的 Clang（`x86_64-windows-gnu`），该配置已验证可构建并通过全部 CTest；MSVC 尚未验证。
+也可直接使用 CMake 3.22+ 与 Ninja：
 
 ```powershell
-cmake -S . -B build-cmake -G Ninja -DCMAKE_BUILD_TYPE=Release --toolchain cmake/zig-toolchain.cmake
+cmake -S . -B build-cmake -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build-cmake
 ctest --test-dir build-cmake --output-on-failure
 ```
@@ -88,6 +88,7 @@ ArkFramework.dll
 ArkImGui.dll
 ArkBootstrap.dll
 plugins\
+BetterBattleWeb\
 LICENSE
 licenses\
 ```
@@ -99,7 +100,8 @@ licenses\
 1. 游戏以管理员权限运行时，加载器会请求一次 UAC 提权。
 2. 若游戏已在运行，需先完全退出；加载器只接受开始等待后新启动的 `Arknights.exe`。
 3. 检测到游戏后载入核心，加载与启动共限时 120 秒；失败时显示阶段与 Windows 错误码，不对同一进程重试。
-4. 成功后实时显示 `logs\ArkFramework.log`。游戏退出后继续等待下一次启动。
+4. 加载成功后会从 `BetterBattleWeb\BetterBattleWeb.exe` 自动启动 WebView 控制台。
+5. 成功后实时显示 `logs\ArkFramework.log`。游戏退出后继续等待下一次启动。
 
 命令行：
 

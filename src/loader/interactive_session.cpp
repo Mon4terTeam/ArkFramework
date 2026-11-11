@@ -26,6 +26,27 @@ bool framework_files_present(const std::filesystem::path& root) {
     return true;
 }
 
+void start_webview(const std::filesystem::path& root) {
+    const std::filesystem::path executable =
+        root / L"BetterBattleWeb" / L"BetterBattleWeb.exe";
+    if (GetFileAttributesW(executable.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        print_status(L"未找到 BetterBattle WebView：%ls", executable.c_str());
+        return;
+    }
+    std::wstring command = L"\"" + executable.wstring() + L"\"";
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process{};
+    if (!CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr, FALSE, 0,
+                        nullptr, executable.parent_path().c_str(), &startup, &process)) {
+        print_status(L"启动 BetterBattle WebView 失败（Windows 错误 %lu）。", GetLastError());
+        return;
+    }
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    print_status(L"已启动 BetterBattle WebView。");
+}
+
 // Waits for one new game launch and loads it. Returns false on a watcher error that ends
 // the session; a failed load only skips that game process.
 bool serve_next_game(const std::filesystem::path& root) {
@@ -56,6 +77,7 @@ bool serve_next_game(const std::filesystem::path& root) {
         return true;
     }
     print_status(L"加载完成。游戏内按 Insert 显示或隐藏全部插件界面；关闭本窗口不会影响游戏。");
+    start_webview(root);
     while (process.valid() &&
            WaitForSingleObject(process.get(), kLogPumpIntervalMs) == WAIT_TIMEOUT) {
         log.pump();
