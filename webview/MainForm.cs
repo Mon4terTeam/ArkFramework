@@ -189,7 +189,8 @@ internal sealed class MainForm : Form
                 Log("web: " + (logMessage.GetString() ?? ""));
                 return;
             }
-            if (messageType is "gameview-enter" or "gameview-layout" or
+            if (messageType is "gameview-attach" or "gameview-enter" or
+                "gameview-layout" or "gameview-hide" or
                 "gameview-leave" or "gameview-detach")
             {
                 HandleGameViewMessage(messageType, root);
@@ -327,14 +328,15 @@ internal sealed class MainForm : Form
 
     private void HandleGameViewMessage(string type, JsonElement root)
     {
-        if (type == "gameview-leave")
+        var requestId = ReadLong(root, "requestId");
+        if (type is "gameview-hide" or "gameview-leave")
         {
-            _gameWindow.Leave();
+            _gameWindow.Hide(requestId);
             return;
         }
         if (type == "gameview-detach")
         {
-            _gameWindow.DetachAndShow();
+            _gameWindow.DetachAndShow(requestId);
             return;
         }
         if (!root.TryGetProperty("rect", out var rect) ||
@@ -348,14 +350,30 @@ internal sealed class MainForm : Form
         var height = ReadDouble(rect, "h");
         var dpr = ReadDouble(root, "dpr");
         if (dpr <= 0) dpr = 1.0;
-        if (type == "gameview-enter")
+        if (type is "gameview-attach" or "gameview-enter")
         {
-            _gameWindow.Enter(x, y, width, height, dpr);
+            _gameWindow.Attach(x, y, width, height, dpr, requestId);
         }
         else
         {
-            _gameWindow.UpdateLayout(x, y, width, height, dpr);
+            _gameWindow.UpdateLayout(x, y, width, height, dpr, requestId);
         }
+    }
+
+    private static long ReadLong(JsonElement element, string name)
+    {
+        if (!element.TryGetProperty(name, out var value)) return 0;
+        if (value.ValueKind == JsonValueKind.Number &&
+            value.TryGetInt64(out var number))
+        {
+            return number;
+        }
+        if (value.ValueKind == JsonValueKind.String &&
+            long.TryParse(value.GetString(), out number))
+        {
+            return number;
+        }
+        return 0;
     }
 
     private static double ReadDouble(JsonElement element, string name)

@@ -6,13 +6,18 @@
 
   let lastEnemyFocusAt = 0;
   let lastEnemyFocusUid = 0;
+  let panelOpen = false;
+  let panelTargetUid = -1;
 
   function selectEnemy(uid, focus = false) {
+    const focusInGame = typeof focus === "object"
+      ? focus?.focusInGame === true
+      : focus === true;
     const value = Number(uid);
     if (!Number.isFinite(value) || value <= 0) return;
     window.BetterBattleSession?.selectEnemy(value);
     renderEnemies();
-    if (focus) {
+    if (focusInGame) {
       const now = Date.now();
       if (value === lastEnemyFocusUid && now - lastEnemyFocusAt < 300) return;
       lastEnemyFocusUid = value;
@@ -96,15 +101,149 @@
     const hp = Number(enemy?.hp) || 0;
     const maxHp = Number(enemy?.max_hp) || 0;
     return [
-      ["生命", `${fmtExact(hp)} / ${fmtExact(maxHp)}`],
-      ["攻击", fmt(enemy?.atk, 0)],
-      ["防御", fmt(enemy?.def, 0)],
-      ["法抗", `${fmt(enemy?.magic_resistance, 0)}%`],
-      ["攻速", fmt(enemy?.attack_speed, 0)],
-      ["移速", fmt(enemy?.move_speed, 3)],
-      ["阻挡", String(enemy?.block_count ?? 0)],
-      ["重量", String(enemy?.mass_level ?? 0)],
+      ["生命", `${fmtExact(hp)} / ${fmtExact(maxHp)}`, "MAX_HP"],
+      ["攻击", fmt(enemy?.atk, 0), "ATK"],
+      ["防御", fmt(enemy?.def, 0), "DEF"],
+      ["法抗", `${fmt(enemy?.magic_resistance, 0)}%`, "MAGIC_RESISTANCE"],
+      ["攻速", fmt(enemy?.attack_speed, 0), "ATTACK_SPEED"],
+      ["移速", fmt(enemy?.move_speed, 3), "MOVE_SPEED"],
+      ["阻挡", String(enemy?.block_count ?? 0), "BLOCK_CNT"],
+      ["重量", String(enemy?.mass_level ?? 0), ""],
     ];
+  }
+
+  function panelNumber(value, digits = 2) {
+    const number = Number(value);
+    return Number.isFinite(number)
+      ? number.toLocaleString("zh-CN", { maximumFractionDigits: digits })
+      : "--";
+  }
+
+  function panelSigned(value, digits = 2) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "--";
+    if (Math.abs(number) < 1e-9) return "0";
+    return `${number > 0 ? "+" : ""}${panelNumber(number, digits)}`;
+  }
+
+  function panelPercent(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "--";
+    return `${number >= 0 ? "+" : ""}${(number * 100).toFixed(2)}%`;
+  }
+
+  function panelSignedTerm(value, digits = 2) {
+    const number = Number(value);
+    if (!Number.isFinite(number) || Math.abs(number) < 1e-9) return "";
+    return `${number > 0 ? "+" : "-"} ${panelNumber(Math.abs(number), digits)}`;
+  }
+
+  function panelPercentTerm(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number) || Math.abs(number) < 1e-9) return "";
+    return `${number > 0 ? "+" : "-"} ${(Math.abs(number) * 100).toFixed(2)}%`;
+  }
+
+  function panelModifierLabel(modifier) {
+    if (modifier?.kind === "buff") {
+      const key = modifier.key || "Buff";
+      const uid = Number(modifier.uid) || 0;
+      const source = modifier.source && modifier.source !== key
+        ? ` · ${modifier.source}`
+        : "";
+      return `${key}${uid ? ` #${uid}` : ""}${source}`;
+    }
+    const className = String(modifier?.class_name || "其他修饰器");
+    return `其他 · ${className.split(".").pop()}`;
+  }
+
+  function panelModifierEffects(modifier) {
+    const effects = [];
+    const addition = Number(modifier?.addition) || 0;
+    const multiplier = Number(modifier?.multiplier) || 0;
+    const finalAddition = Number(modifier?.final_addition) || 0;
+    const finalScaler = Number(modifier?.final_scaler);
+    if (Math.abs(addition) > 1e-9) effects.push(panelSigned(addition));
+    if (Math.abs(multiplier) > 1e-9) effects.push(panelPercent(multiplier));
+    if (Math.abs(finalAddition) > 1e-9) {
+      effects.push(`${panelSigned(finalAddition)} 最终加算`);
+    }
+    if (Number.isFinite(finalScaler) && Math.abs(finalScaler - 1) > 1e-9) {
+      effects.push(`×${panelNumber(finalScaler, 4)} 最终乘算`);
+    }
+    return effects;
+  }
+
+  function syncPanelTarget(selected) {
+    const next = panelOpen && selected ? Number(selected.uid) || 0 : 0;
+    if (next === panelTargetUid) return;
+    panelTargetUid = next;
+    sendCommand(`panel ${next}`);
+  }
+
+  function setPanelOpen(open) {
+    panelOpen = !!open;
+    if (dom.enemyPanelToggle) dom.enemyPanelToggle.checked = panelOpen;
+    document.querySelectorAll("[data-enemy-panel-toggle]").forEach((node) => {
+      node.checked = panelOpen;
+    });
+    renderEnemies();
+    window.BetterBattleGameView?.refreshDetail?.();
+  }
+
+  function panelCalcHtml(row) {
+    if (!row) return "";
+    // Entity.get_moveSpeed 把 Attributes.GetValue(MOVE_SPEED) 再乘 0.5。
+    // 这里把计算过程换算到同一显示单位，避免面板值 1.35 而公式显示 2.70。
+    const displayScale = row.attribute === "MOVE_SPEED" ? 0.5 : 1;
+    const raw = (Number(row.raw) || 0) * displayScale;
+    const addition = (Number(row.addition) || 0) * displayScale;
+    const multiplier = Number(row.multiplier) || 0;
+    const finalAddition = (Number(row.final_addition) || 0) * displayScale;
+    const finalScaler = Number(row.final_scaler);
+    const hasAddition = Math.abs(addition) > 1e-9;
+    const hasMultiplier = Math.abs(multiplier) > 1e-9;
+    const hasFinalAddition = Math.abs(finalAddition) > 1e-9;
+    const hasFinalScaler = Number.isFinite(finalScaler) &&
+      Math.abs(finalScaler - 1) > 1e-9;
+    if (!hasAddition && !hasMultiplier && !hasFinalAddition &&
+        !hasFinalScaler) {
+      return "";
+    }
+    let expression = panelNumber(raw, 2);
+    if (hasAddition) {
+      expression = `(${expression} ${panelSignedTerm(addition)})`;
+    }
+    if (hasMultiplier) {
+      expression = `${expression} × (1 ${panelPercentTerm(multiplier)})`;
+    }
+    if (hasFinalAddition) {
+      expression = `(${expression} ${panelSignedTerm(finalAddition)})`;
+    }
+    if (hasFinalScaler) {
+      expression = `${panelNumber(finalScaler, 4)} × ${expression}`;
+    }
+    const predicted = Number(row.predicted) * displayScale;
+    const actual = Number(row.actual) * displayScale;
+    const mismatch = Number.isFinite(predicted) && Number.isFinite(actual) &&
+      Math.abs(predicted - actual) > 0.01;
+    const modifierHtml = (Array.isArray(row.modifiers) ? row.modifiers : [])
+      .map((modifier) => {
+        const effects = panelModifierEffects({
+          ...modifier,
+          addition: (Number(modifier.addition) || 0) * displayScale,
+          final_addition:
+            (Number(modifier.final_addition) || 0) * displayScale,
+        });
+        if (!effects.length) return "";
+        return `<div class="enemy-stat-mod"><span>${esc(panelModifierLabel(modifier))}</span>` +
+          `<code>${esc(effects.join(" "))}</code></div>`;
+      }).filter(Boolean).join("");
+    return `<div class="enemy-stat-calc">
+      <div class="enemy-stat-formula">${esc(expression)} = ${esc(panelNumber(predicted, 2))}</div>
+      ${mismatch ? `<div class="enemy-stat-note">实际 ${esc(panelNumber(actual, 2))}，含 clamp/舍入</div>` : ""}
+      ${modifierHtml}
+    </div>`;
   }
 
   function gameTextHtml(value) {
@@ -269,9 +408,17 @@
         ? tags.map((tag) => `<span>${esc(tag)}</span>`).join("")
         : "");
       const stats = enemyStatRows(selected);
-      setHtml(dom.enemyStatGrid, stats.map(([label, value]) =>
-        `<div class="enemy-stat"><span>${label}</span><strong>${esc(value)}</strong></div>`,
-      ).join(""));
+      const panelRows = new Map(
+        (Array.isArray(selected.panel) ? selected.panel : [])
+          .map((row) => [row.attribute, row]),
+      );
+      setHtml(dom.enemyStatGrid, stats.map(([label, value, attribute]) => {
+        const calc = panelOpen && attribute
+          ? panelCalcHtml(panelRows.get(attribute))
+          : "";
+        return `<div class="enemy-stat${calc ? " has-calc" : ""}"><span>${esc(label)}</span>` +
+          `<strong>${esc(value)}</strong>${calc}</div>`;
+      }).join(""));
       renderAbnormalChips(
         dom.enemyAbnormalChips,
         dom.enemyAbnormalCount,
@@ -384,6 +531,9 @@
         : `<div class="empty-small">当前没有 Buff</div>`);
     }
 
+    if (dom.enemyPanelToggle) dom.enemyPanelToggle.checked = panelOpen;
+    syncPanelTarget(selected);
+
     dom.enemyWaveMeta.textContent = waveTotal > 0
       ? `计划 ${waveList.reduce((sum, wave) => sum + (Number(wave.total) || 0), 0)} 个敌人 · ${waveCurrent}/${waveTotal} 波已出场；动态召唤不在其中`
       : "等待关卡波次数据；动态召唤不在计划列表中";
@@ -403,6 +553,9 @@
   pages.enemies = {
     render: renderEnemies,
     select: selectEnemy,
+    setPanelOpen,
+    panelOpenState: () => panelOpen,
+    panelCalcHtml,
     profileFor: enemyProfileFor,
     statRows: enemyStatRows,
     displayLabel: enemyDisplayLabel,

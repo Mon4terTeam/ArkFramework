@@ -299,7 +299,8 @@
     "enemyCountBadge", "enemyWaveBadge", "enemyFocusBadge", "enemyList",
     "enemyDetailName", "enemyDetailMeta", "enemyDetailSerial",
     "enemyAvatar", "enemyProfileMeta", "enemyDescription", "enemyTags",
-    "enemyStatGrid", "enemyAbnormalCount", "enemyAbnormalChips",
+    "enemyStatGrid", "enemyPanelToggle",
+    "enemyAbnormalCount", "enemyAbnormalChips",
     "enemyAbilities", "enemySkills",
     "enemyBuffs", "enemyWaveMeta", "enemyWaves",
     "diagConnected", "diagQueue", "diagCatalog",
@@ -928,6 +929,8 @@
     document.querySelectorAll(".page").forEach((node) => {
       node.classList.toggle("active", node.id === "page-" + tab);
     });
+    document.querySelector(".workspace")?.classList.toggle(
+      "is-scrollbar-hidden", tab === "timeline" || tab === "gameview");
     window.BetterBattleAssets?.observe(document.getElementById("page-" + tab));
     renderActivePage();
     syncTimeUnitButtons();
@@ -1113,6 +1116,13 @@
       sendCommand(protocol.commands.withdraw(button.dataset.uid));
     }
   }, true);
+
+  document.addEventListener("change", (event) => {
+    const toggle = event.target?.closest?.("[data-enemy-panel-toggle]");
+    if (toggle) {
+      enemyPage.setPanelOpen?.(toggle.checked);
+    }
+  });
 
   let actionModalResolve = null;
 
@@ -1826,6 +1836,16 @@
         const [mode, grade] = String(difficulty.value || "").split(":").map(Number);
         if (!Number.isFinite(mode) || !Number.isFinite(grade)) return;
         setConfigEntry(topic.id, { mode, grade });
+      });
+    }
+    const zone = document.getElementById("configZone");
+    if (zone) {
+      zone.addEventListener("change", () => {
+        const topic = configTopicData(state.configTopic);
+        if (!topic) return;
+        const value = Math.min(99, Math.max(1, Math.round(Number(zone.value) || 1)));
+        zone.value = String(value);
+        setConfigEntry(topic.id, { zone: value });
       });
     }
   }

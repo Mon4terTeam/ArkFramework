@@ -1173,8 +1173,7 @@
       emptyText);
   }
 
-  function renderGlobalBuffs(snapshot) {
-    if (!dom.globalBuffs) return;
+  function globalBuffsView(snapshot) {
     const catalog = window.BuffCatalog;
     const groups = Array.isArray(snapshot?.global_buffs)
       ? snapshot.global_buffs
@@ -1183,17 +1182,6 @@
     const total = groups.reduce((sum, group) =>
       sum + (Array.isArray(group?.buffs) ? group.buffs.length : 0), 0);
     const relicTotal = Array.isArray(rogue?.relics) ? rogue.relics.length : 0;
-    const signature = `${groups.length}:${total}:${relicTotal}`;
-    if (snapshot && signature !== state.globalBuffSignature) {
-      state.globalBuffSignature = signature;
-      window.BetterBattleProtocol?.post({
-        type: window.BetterBattleProtocol?.Message?.Log,
-        message: `全局效果面板：组 ${groups.length}，Buff ${total}，藏品 ${relicTotal}`,
-      });
-    }
-    if (dom.globalBuffCount) {
-      dom.globalBuffCount.textContent = String(total);
-    }
     const parts = [];
     if (rogue?.valid) {
       const relicList = Array.isArray(rogue.relics) ? rogue.relics : [];
@@ -1263,11 +1251,33 @@
         `<span class="global-buff-meta">${esc(group.source || "")}` +
         `${group.layer_mask ? ` · 层 ${esc(group.layer_mask)}` : ""}` +
         `${group.uid ? ` · #${esc(group.uid)}` : ""}</span></div>` +
-        boardHtml + relicHtml + rows + `</div>`);
+        rows + boardHtml + relicHtml + `</div>`);
     }
-    setHtml(dom.globalBuffs, parts.length
-      ? parts.join("")
-      : `<div class="empty-small">当前没有读取到全局效果</div>`);
+    return {
+      groups,
+      total,
+      relicTotal,
+      html: parts.length
+        ? parts.join("")
+        : `<div class="empty-small">当前没有读取到全局效果</div>`,
+    };
+  }
+
+  function renderGlobalBuffs(snapshot) {
+    if (!dom.globalBuffs) return;
+    const view = globalBuffsView(snapshot);
+    const signature = `${view.groups.length}:${view.total}:${view.relicTotal}`;
+    if (snapshot && signature !== state.globalBuffSignature) {
+      state.globalBuffSignature = signature;
+      window.BetterBattleProtocol?.post({
+        type: window.BetterBattleProtocol?.Message?.Log,
+        message: `全局效果面板：组 ${view.groups.length}，Buff ${view.total}，藏品 ${view.relicTotal}`,
+      });
+    }
+    if (dom.globalBuffCount) {
+      dom.globalBuffCount.textContent = String(view.total);
+    }
+    setHtml(dom.globalBuffs, view.html);
   }
 
   function renderBattleRightTabs() {
@@ -1301,6 +1311,7 @@
     staticArtFor,
     buildUnitRailRows,
     operatorDetailView,
+    globalBuffsView,
     buffHtml,
     collectAbnormalChips,
     abnormalChipsHtml,

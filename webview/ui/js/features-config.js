@@ -18,6 +18,7 @@
       return {
         mode: 2,
         grade: 0,
+        zone: 1,
         gold: 0,
         scrap: -1,
         scrapLimit: -1,
@@ -42,6 +43,7 @@
     return {
       mode: clampInt(raw.mode, 1, 16, Number(difficulty.mode) || 2),
       grade: clampInt(raw.grade, 0, 18, Number(difficulty.grade) || 0),
+      zone: clampInt(raw.zone, 1, 99, 1),
       gold: clampInt(raw.gold, 0, 9999, 0),
       scrap: raw.scrap === undefined || raw.scrap === null || raw.scrap === ""
         ? -1
@@ -123,6 +125,7 @@
       result[topic.id] = {
         mode: clampInt(entry.mode, 1, 16, Number(difficulty.mode) || 2),
         grade: clampInt(entry.grade, 0, 18, Number(difficulty.grade) || 0),
+        zone: clampInt(entry.zone, 1, 99, 1),
         gold: clampInt(entry.gold, 0, 9999, 0),
         scrap: entry.scrap === undefined || entry.scrap === null ||
           entry.scrap === ""
@@ -298,8 +301,12 @@
       .concat(selected?.addDesc || [])
       .filter(Boolean);
     note.textContent = details.length
-      ? details.join(" · ")
+      ? details.join(" · ").replace(/\\n/g, "\n")
       : "该难度没有额外的战斗规则说明。";
+    const zoneInput = document.getElementById("configZone");
+    if (zoneInput && document.activeElement !== zoneInput) {
+      zoneInput.value = String(entry.zone);
+    }
   }
 
   function renderConfigSummary(topic, entry) {
@@ -315,7 +322,8 @@
     if (badge) {
       const difficulty = (topic.difficulties || []).find(
         (item) => item.mode === entry.mode && item.grade === entry.grade);
-      badge.textContent = `${topic.name} · ${configDifficultyLabel(difficulty || entry)}`;
+      badge.textContent =
+        `${topic.name} · ${configDifficultyLabel(difficulty || entry)} · 第${entry.zone}层`;
     }
   }
 
@@ -1064,6 +1072,23 @@
     setHtml(tree, html);
   }
 
+  let charBuffHome = null;
+  function placeCharBuffPanel(topic) {
+    const panel = document.getElementById("configCharBuffPanel");
+    const resource = document.querySelector(".config-resource-panel");
+    if (!panel || !resource) return;
+    if (!charBuffHome && panel.parentElement) {
+      charBuffHome = { parent: panel.parentElement, next: panel.nextSibling };
+    }
+    const inline = topic?.id === "rogue_5";
+    panel.classList.toggle("config-panel-inline", inline);
+    if (inline) {
+      if (panel.parentElement !== resource) resource.appendChild(panel);
+    } else if (charBuffHome && panel.parentElement !== charBuffHome.parent) {
+      charBuffHome.parent.insertBefore(panel, charBuffHome.next);
+    }
+  }
+
   function renderConfig() {
     const page = document.getElementById("page-config");
     if (!page) return;
@@ -1084,6 +1109,7 @@
     renderConfigMasteries(topic, entry);
     renderConfigRelics(topic, entry);
     renderConfigSpecials(topic, entry);
+    placeCharBuffPanel(topic);
     renderConfigCharBuffs(topic, entry);
     renderConfigCopper(topic, entry);
     renderConfigRunBuffs(topic, entry);
@@ -1133,6 +1159,7 @@
     if (resourceKeys.includes("scrapLimit") && entry.scrapLimit >= 0) {
       parts.push(`--scraplimit=${entry.scrapLimit}`);
     }
+    parts.push(`--zone=${entry.zone}`);
     const pushOuterBuff = (buff) => {
       if (Array.isArray(buff?.randomKeyField) && buff.randomKeyField.length) {
         const chosen = buff.randomKeyField[

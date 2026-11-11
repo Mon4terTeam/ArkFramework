@@ -120,6 +120,21 @@
   border-color: var(--accent);
 }
 
+.config-number {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  outline: none;
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.config-number:focus {
+  border-color: var(--accent);
+}
+
 .config-note {
   min-height: 34px;
   margin: 0;
@@ -1130,11 +1145,44 @@
   margin: 4px 0 12px;
 }
 
+.enemy-stat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.enemy-stat-head .section-label {
+  margin-bottom: 0;
+}
+
+.enemy-panel-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.enemy-panel-toggle input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
 .enemy-stat {
   padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
   background: rgba(255, 255, 255, 0.025);
+}
+
+.enemy-stat.has-calc {
+  border-color: rgba(143, 240, 192, 0.22);
 }
 
 .enemy-stat span {
@@ -1147,6 +1195,48 @@
   display: block;
   margin-top: 3px;
   font: 600 14px/1.2 var(--font-mono);
+}
+
+.enemy-stat-calc {
+  display: grid;
+  gap: 3px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+.enemy-stat-formula {
+  color: var(--text);
+  font: 9px/1.35 var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.enemy-stat-note {
+  color: var(--warning, #d8a657);
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.enemy-stat-mod {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.enemy-stat-mod span {
+  min-width: 0;
+  font-size: 9px;
+  overflow-wrap: anywhere;
+}
+
+.enemy-stat-mod code {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font: 9px/1.35 var(--font-mono);
 }
 
 .enemy-detail-section {
@@ -1341,4 +1431,19 @@
     width: 72px;
     height: 72px;
   }
+}
+
+#configDifficultyDesc {
+  white-space: pre-line;
+}
+
+.config-panel-inline {
+  margin-top: 16px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.config-panel-inline .config-panel-head {
+  padding: 12px 0 10px;
 }

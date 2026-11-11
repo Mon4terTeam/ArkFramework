@@ -287,7 +287,9 @@ function wrathRecipe(id) {
       case "rogue_5_wrath_4_d":
         return recipe([lifeAdd(1)]);
       case "rogue_5_wrath_5_d":
-        return recipe([skillCost(0.95)]);
+        return recipe([skillCost(0.95)],
+          "实测 rogue_5_wrath_5_d：char_skill_cost_mul，" +
+          "scale=0.95、全职业；真实战斗捕获");
       case "rogue_5_wrath_6_d":
         return recipe([allyMul([["max_hp", 0.1]])]);
       case "rogue_5_wrath_7_d":
@@ -352,8 +354,12 @@ function wrathRecipe(id) {
     case 5:
       return recipe([prefab("rogue_5_character_deploy_lose_sp", [
         ["prob", 1],
-        ["value", [0.1, 0.2, 0.3][index]],
-      ])], "部署时流失最大技力值");
+        ["sp", [0.1, 0.2, 0.3][index]],
+        ["selector.profession", ALL_PROFESSIONS],
+      ])], index === 1
+        ? "实测 rogue_5_wrath_5_b：rogue_5_character_deploy_lose_sp，" +
+          "sp=0.2、prob=1、全职业；真实战斗捕获"
+        : "同 rogue_5_character_deploy_lose_sp 链路，按等级取 sp=0.1/0.3");
     case 6:
       return recipe([prefab("rogue_5_character_deploy_attribute_down", [
         ["prob", [0.1, 0.1, 0.15][index]],
@@ -482,8 +488,12 @@ function variationRecipe(id) {
   switch (id) {
     case "variation_1":
       return recipe([
-        makeBuff("char_ability_new", "rogue_6_wooden_weather_1", [["damage_scale", 0.2]]),
-      ], "巨人摇篮：动态 ability 标记八格内目标，八格外物理/法术伤害 ×0.2。攻击力 +50% 走藏品路径，具体 Buff key 与加算方式待真实样本确认，当前不注入");
+        allyMul([["atk", 0.5]]),
+        makeBuff("char_ability_new", "rogue_6_wooden_weather_1", [
+          ["range_id", "x-4"],
+          ["damage_scale", 0.2],
+        ]),
+      ], "巨人摇篮：我方攻击力 +50%；x-4 范围外目标受到物理/法术伤害 ×0.2");
     case "variation_2":
       return recipe([
         direct("char_skill_cost_mul", [["scale", 0.6]]),

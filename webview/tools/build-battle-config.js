@@ -56,7 +56,8 @@ function values(object) {
 
 function hasIcon(topicId, iconId) {
   if (!iconId) return false;
-  return fs.existsSync(path.join(iconRoot, topicId, `${iconId}.png`));
+  return fs.existsSync(path.join(iconRoot, topicId, `${iconId}.webp`)) ||
+    fs.existsSync(path.join(iconRoot, topicId, `${iconId}.png`));
 }
 
 function cleanText(value) {
@@ -74,6 +75,8 @@ const VERIFIED_SPECIALS = {
     /^rogue_5_wrath_8_d$/,
     /^rogue_5_wrath_2_[abc]$/,
     /^rogue_5_wrath_2_d$/,
+    /^rogue_5_wrath_5_[abc]$/,
+    /^rogue_5_wrath_5_d$/,
   ],
   rogue_6: [
     /^rogue_6_weather_1_[abc]$/,
@@ -81,6 +84,8 @@ const VERIFIED_SPECIALS = {
     /^rogue_6_weather_4_[abc]$/,
     /^rogue_6_weather_7_[abc]$/,
     /^rogue_6_weather_8_[abc]$/,
+    /^variation_1$/,
+    /^variation_2$/,
     /^variation_3$/,
     /^variation_4$/,
     /^variation_7$/,
@@ -199,6 +204,23 @@ function normalizeVariantIcons(items) {
     }
   }
   return items;
+}
+
+function normalizeIconExtensions(value) {
+  if (Array.isArray(value)) {
+    for (const item of value) normalizeIconExtensions(item);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  if (typeof value.icon === "string" && value.icon.endsWith(".png")) {
+    const webp = value.icon.replace(/\.png$/, ".webp");
+    if (fs.existsSync(path.join(iconRoot, webp))) {
+      value.icon = webp;
+    }
+  }
+  for (const child of Object.values(value)) {
+    normalizeIconExtensions(child);
+  }
 }
 
 const conceptBattleEffects = {
@@ -902,6 +924,7 @@ const topics = Object.entries(topicMeta).map(([topicId, meta]) => {
   normalizeVariantIcons(topic.totems);
   normalizeVariantIcons(topic.concepts);
   normalizeVariantIcons(topic.tech);
+  normalizeIconExtensions(topic);
   for (const group of topic.special) {
     normalizeVariantIcons(group.items);
   }

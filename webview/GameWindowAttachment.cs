@@ -24,9 +24,13 @@ internal sealed class GameWindowAttachment : IDisposable
     private const uint SWP_NOMOVE = 0x0002;
     private const uint SWP_NOZORDER = 0x0004;
     private const uint SWP_NOACTIVATE = 0x0010;
-    private const uint SWP_SHOWWINDOW = 0x0040;
     private const uint SWP_FRAMECHANGED = 0x0020;
+    private const uint SWP_SHOWWINDOW = 0x0040;
+    private const uint SWP_HIDEWINDOW = 0x0080;
     private const int SW_HIDE = 0;
+    private const int SW_SHOWNORMAL = 1;
+    private const int SW_SHOWMINIMIZED = 2;
+    private const int SW_SHOWMAXIMIZED = 3;
     private const int SW_SHOW = 5;
     private const int SW_SHOWNOACTIVATE = 4;
     private const int SW_RESTORE = 9;
@@ -40,6 +44,41 @@ internal sealed class GameWindowAttachment : IDisposable
     private const long WS_MINIMIZEBOX = 0x00020000L;
     private const long WS_MAXIMIZEBOX = 0x00010000L;
 
+    private enum GameWindowState
+    {
+        Unavailable,
+        Detached,
+        Attaching,
+        Attached,
+        Hidden,
+        Error,
+    }
+
+    private sealed class Capture
+    {
+        public IntPtr Hwnd { get; init; }
+        public int Pid { get; init; }
+        public IntPtr PreviousOwner { get; init; }
+        public long Style { get; init; }
+        public Rectangle Rect { get; init; }
+        public int ShowCmd { get; init; }
+        public bool Visible { get; init; }
+    }
+
+    private sealed class RestoreState
+    {
+        public long Hwnd { get; set; }
+        public int Pid { get; set; }
+        public long PreviousOwner { get; set; }
+        public long Style { get; set; }
+        public int Left { get; set; }
+        public int Top { get; set; }
+        public int Right { get; set; }
+        public int Bottom { get; set; }
+        public int ShowCmd { get; set; }
+        public bool Visible { get; set; }
+    }
+
     private readonly Form _dashboard;
     private readonly WebView2 _webView;
     private readonly Action<string> _log;
@@ -49,37 +88,24 @@ internal sealed class GameWindowAttachment : IDisposable
     private readonly System.Windows.Forms.Timer _settle =
         new() { Interval = 120 };
 
-    private bool _active;
-    private bool _disposed;
-    private bool _ownerSet;
-    private bool _captureGame;
+    private GameWindowState _state = GameWindowState.Unavailable;
+    private Capture? _capture;
     private IntPtr _game;
-    private int _gamePid;
-    private IntPtr _previousOwner;
-    private long _originalStyle;
-    private Rectangle _originalRect;
-    private int _originalClientWidth;
-    private int _originalClientHeight;
-    private bool _originalVisible;
+    private bool _attachWanted;
+    private long _requestId;
+    private int _generation;
+    private int _settleGeneration;
     private int _settleTicks;
+    private bool _settleFocusGame;
+    private string _message = "";
+    private bool _disposed;
+    private bool _dashboardMinimized;
     private Rectangle _appliedFrame;
     private double _cssX;
     private double _cssY;
     private double _cssWidth;
     private double _cssHeight;
     private double _dpr = 1.5;
-
-    private sealed class RestoreState
-    {
-        public long Hwnd { get; set; }
-        public int Pid { get; set; }
-        public long Style { get; set; }
-        public int Left { get; set; }
-        public int Top { get; set; }
-        public int Right { get; set; }
-        public int Bottom { get; set; }
-        public bool Visible { get; set; }
-    }
 
     public GameWindowAttachment(
         Form dashboard,
@@ -93,204 +119,531 @@ internal sealed class GameWindowAttachment : IDisposable
         _post = post;
         _watch.Tick += (_, _) => Watch();
         _settle.Tick += (_, _) => SettleTick();
+        _dashboard.Resize += OnDashboardStateChanged;
+        _dashboard.VisibleChanged += OnDashboardStateChanged;
     }
 
-    public void Enter(double x, double y, double width, double height, double dpr)
+    private void OnDashboardStateChanged(object? sender, EventArgs e)
+    {
+        SyncDashboardState();
+    }
+
+    private void SyncDashboardState()
     {
         if (_disposed) return;
-        _active = true;
+        if (_dashboard.WindowState == FormWindowState.Minimized)
+        {
+            _dashboardMinimized = true;
+            _settle.Stop();
+            if (_state is GameWindowState.Attached or GameWindowState.Attaching &&
+                _game != IntPtr.Zero && IsWindow(_game))
+            {
+                ShowWindow(_game, SW_HIDE);
+            }
+            return;
+        }
+        if (!_dashboardMinimized) return;
+        _dashboardMinimized = false;
+        if (_state != GameWindowState.Attached ||
+            _game == IntPtr.Zero || !IsWindow(_game))
+        {
+            return;
+        }
+        ApplyLayout();
+        ShowWindow(_game,
+            IsIconic(_game) ? SW_RESTORE : SW_SHOWNOACTIVATE);
+        BeginSettle(focusGame: false);
+        NudgeWebView();
+    }
+
+    private void NudgeWebView()
+    {
+        if (_webView.IsDisposed || !_webView.IsHandleCreated) return;
+        var bounds = _webView.Bounds;
+        if (bounds.Width <= 4 || bounds.Height <= 4) return;
+        _webView.Bounds = new Rectangle(
+            bounds.X, bounds.Y, bounds.Width - 1, bounds.Height);
+        _webView.Bounds = bounds;
+        _webView.Invalidate();
+        _webView.Update();
+    }
+
+    public void Attach(
+        double x, double y, double width, double height, double dpr,
+        long requestId)
+    {
+        if (_disposed) return;
         _cssX = x;
         _cssY = y;
         _cssWidth = width;
         _cssHeight = height;
         _dpr = Math.Max(1.0, dpr);
-        _watch.Start();
-        AttachOrUpdate();
+        _requestId = Math.Max(_requestId, requestId);
+        _attachWanted = true;
+
+        if (_state == GameWindowState.Attached)
+        {
+            ApplyLayout();
+            PostState();
+            return;
+        }
+        if (_state == GameWindowState.Attaching)
+        {
+            if (ApplyLayout())
+            {
+                PromoteAttached(layoutApplied: true);
+            }
+            else
+            {
+                PostState();
+            }
+            return;
+        }
+        TryAttach();
     }
 
     public void UpdateLayout(
-        double x, double y, double width, double height, double dpr)
+        double x, double y, double width, double height, double dpr,
+        long requestId)
     {
-        if (_disposed || !_active) return;
+        if (_disposed) return;
+        if (requestId > 0 && requestId < _requestId) return;
         _cssX = x;
         _cssY = y;
         _cssWidth = width;
         _cssHeight = height;
         _dpr = Math.Max(1.0, dpr);
-        if (_game != IntPtr.Zero)
+        _requestId = Math.Max(_requestId, requestId);
+
+        if (_state == GameWindowState.Attached)
         {
             ApplyLayout();
         }
+        else if (_state == GameWindowState.Attaching && ApplyLayout())
+        {
+            PromoteAttached(layoutApplied: true);
+        }
     }
 
-    public void Leave()
+    public void Hide(long requestId)
     {
-        _active = false;
+        if (_disposed) return;
+        _requestId = Math.Max(_requestId, requestId);
+        _attachWanted = false;
         _watch.Stop();
-        Detach(hideAfterRestore: true, keepHandle: true);
-        _post(new
+        _settle.Stop();
+        if (_state is GameWindowState.Attached or GameWindowState.Attaching)
         {
-            type = "gameview-state",
-            state = "waiting",
-            message = "已离开游戏视图",
-        });
+            RestoreAndHide();
+            return;
+        }
+        PostState();
     }
 
-    public void DetachAndShow()
+    public void DetachAndShow(long requestId)
     {
-        _active = false;
+        if (_disposed) return;
+        _requestId = Math.Max(_requestId, requestId);
+        _attachWanted = false;
         _watch.Stop();
-        Detach(hideAfterRestore: false, keepHandle: true, forceShow: true);
-        _post(new
+        _settle.Stop();
+        if (_state is GameWindowState.Attached or GameWindowState.Attaching
+            or GameWindowState.Hidden)
         {
-            type = "gameview-state",
-            state = "detached",
-            message = "已解除吸附",
-        });
+            RestoreAndShow();
+            return;
+        }
+        if (_capture is not null && _game != IntPtr.Zero && IsWindow(_game))
+        {
+            RestoreAndShow();
+            return;
+        }
+        _state = GameWindowState.Unavailable;
+        _message = "未吸附";
+        PostState();
+    }
+
+    private void TryAttach()
+    {
+        if (_game == IntPtr.Zero || !IsWindow(_game))
+        {
+            _game = IntPtr.Zero;
+            _capture = null;
+        }
+
+        if (_game == IntPtr.Zero)
+        {
+            var process = FindGameProcess();
+            if (process is null)
+            {
+                SetState(GameWindowState.Unavailable, "等待 Arknights 窗口…");
+                _watch.Start();
+                return;
+            }
+            try
+            {
+                process.Refresh();
+                var hwnd = FindGameWindow((uint)process.Id);
+                if (hwnd == IntPtr.Zero || !IsWindow(hwnd))
+                {
+                    SetState(
+                        GameWindowState.Unavailable,
+                        "游戏进程已找到，等待主窗口…");
+                    _watch.Start();
+                    return;
+                }
+                _game = hwnd;
+                _capture = LoadOrCapture(hwnd, process.Id);
+            }
+            catch (Exception error)
+            {
+                _log("gameview attach failed: " + error);
+                SetState(GameWindowState.Error, error.Message);
+                return;
+            }
+            finally
+            {
+                process.Dispose();
+            }
+        }
+
+        if (_capture is null)
+        {
+            SetState(GameWindowState.Error, "无法保存窗口原始状态");
+            return;
+        }
+
+        SaveRestoreState(_capture);
+
+        if (GetWindow(_game, GW_OWNER) != _dashboard.Handle)
+        {
+            SetWindowLongPtrW(_game, GWLP_HWNDPARENT, _dashboard.Handle);
+        }
+        if (GetWindow(_game, GW_OWNER) != _dashboard.Handle)
+        {
+            SetState(GameWindowState.Error, "无法把游戏窗口设为仪表盘 owner");
+            return;
+        }
+
+        SetState(GameWindowState.Attaching, "正在吸附游戏窗口");
+        if (IsIconic(_game) || IsZoomed(_game))
+        {
+            ShowWindow(_game, SW_RESTORE);
+        }
+        EnsureCaptionlessStyle();
+        if (_cssWidth > 1 && _cssHeight > 1)
+        {
+            if (ApplyLayout())
+            {
+                PromoteAttached(layoutApplied: true);
+            }
+            else
+            {
+                SetState(GameWindowState.Error, "游戏窗口布局失败");
+            }
+        }
+        else
+        {
+            PostState();
+        }
+    }
+
+    private void PromoteAttached(bool layoutApplied = false)
+    {
+        if (_game == IntPtr.Zero || _capture is null || !IsWindow(_game))
+        {
+            SetState(GameWindowState.Error, "游戏窗口已丢失");
+            return;
+        }
+        if (!layoutApplied && !ApplyLayout())
+        {
+            SetState(GameWindowState.Error, "游戏窗口布局无效");
+            return;
+        }
+
+        _state = GameWindowState.Attached;
+        _message = "游戏窗口已吸附";
+        _generation += 1;
+        if (_dashboard.WindowState != FormWindowState.Minimized)
+        {
+            ShowWindow(
+                _game, IsIconic(_game) ? SW_RESTORE : SW_SHOWNOACTIVATE);
+        }
+        _watch.Start();
+        BeginSettle();
+        PostState();
+    }
+
+    private void RestoreAndHide()
+    {
+        _attachWanted = false;
+        _generation += 1;
+        _settle.Stop();
+        _watch.Stop();
+        if (_game == IntPtr.Zero || !IsWindow(_game) || _capture is null)
+        {
+            _game = IntPtr.Zero;
+            _capture = null;
+            DeleteRestoreState();
+            SetState(GameWindowState.Unavailable, "游戏窗口已关闭");
+            return;
+        }
+
+        RestoreWindow(show: false, hide: true);
+        _state = GameWindowState.Hidden;
+        _message = "游戏窗口已隐藏";
+        DeleteRestoreState();
+        SetForegroundWindow(_dashboard.Handle);
+        PostState();
+    }
+
+    private void RestoreAndShow()
+    {
+        _attachWanted = false;
+        _generation += 1;
+        _settle.Stop();
+        _watch.Stop();
+        if (_game == IntPtr.Zero || !IsWindow(_game) || _capture is null)
+        {
+            _game = IntPtr.Zero;
+            _capture = null;
+            DeleteRestoreState();
+            SetState(GameWindowState.Unavailable, "游戏窗口已关闭");
+            return;
+        }
+
+        RestoreWindow(show: true, hide: false);
+        _state = GameWindowState.Detached;
+        _message = "游戏窗口已解除吸附";
+        _capture = null;
+        _game = IntPtr.Zero;
+        DeleteRestoreState();
+        PostState();
+    }
+
+    private void RestoreWindow(bool show, bool hide)
+    {
+        if (_capture is null || _game == IntPtr.Zero || !IsWindow(_game))
+        {
+            return;
+        }
+        SetWindowLongPtrW(_game, GWLP_HWNDPARENT, _capture.PreviousOwner);
+        SetWindowLongPtrW(_game, GWL_STYLE, new IntPtr(_capture.Style));
+        if (show)
+        {
+            ShowWindow(_game, SW_RESTORE);
+            if (_capture.ShowCmd == SW_SHOWMAXIMIZED)
+            {
+                ShowWindow(_game, SW_SHOWMAXIMIZED);
+            }
+            else
+            {
+                var frame = FrameForStyle(_game, _capture.Style);
+                if (frame.Width < 200 || frame.Height < 200)
+                {
+                    frame = _capture.Rect;
+                }
+                SetWindowPos(
+                    _game, IntPtr.Zero,
+                    frame.Left, frame.Top,
+                    frame.Width, frame.Height,
+                    SWP_NOZORDER | SWP_NOACTIVATE |
+                    SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+                ShowWindow(_game, SW_SHOW);
+            }
+            SetForegroundWindow(_game);
+        }
+
+        if (hide)
+        {
+            ShowWindow(_game, SW_HIDE);
+            SetWindowPos(
+                _game, IntPtr.Zero, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
+                SWP_NOACTIVATE | SWP_HIDEWINDOW);
+        }
+        GetWindowRect(_game, out var restored);
+        _log($"gameview restore show={show} hide={hide} " +
+             $"frame={restored.Width}x{restored.Height} " +
+             $"at {restored.Left},{restored.Top} " +
+             $"visible={IsWindowVisible(_game)}");
+    }
+
+    private Capture? LoadOrCapture(IntPtr hwnd, int pid)
+    {
+        if (_capture is not null &&
+            _capture.Hwnd == hwnd && _capture.Pid == pid)
+        {
+            return _capture;
+        }
+
+        var saved = LoadRestoreState();
+        if (saved is not null &&
+            saved.Hwnd == hwnd.ToInt64() && saved.Pid == pid)
+        {
+            var previous = new IntPtr(saved.PreviousOwner);
+            if (previous != IntPtr.Zero && !IsWindow(previous))
+            {
+                previous = IntPtr.Zero;
+            }
+            var savedRect = ClampRect(new RECT
+            {
+                Left = saved.Left,
+                Top = saved.Top,
+                Right = saved.Right,
+                Bottom = saved.Bottom,
+            });
+            _log("gameview original state restored from file");
+            return new Capture
+            {
+                Hwnd = hwnd,
+                Pid = pid,
+                PreviousOwner = previous,
+                Style = saved.Style,
+                Rect = savedRect.ToRectangle(),
+                ShowCmd = saved.ShowCmd == SW_SHOWMAXIMIZED
+                    ? SW_SHOWMAXIMIZED
+                    : SW_SHOWNORMAL,
+                Visible = saved.Visible,
+            };
+        }
+
+        var style = GetWindowLongPtrW(hwnd, GWL_STYLE).ToInt64();
+        GetWindowRect(hwnd, out var rect);
+        var placement = new WINDOWPLACEMENT
+        {
+            length = Marshal.SizeOf<WINDOWPLACEMENT>(),
+        };
+        var hasPlacement = GetWindowPlacement(hwnd, ref placement);
+        var showCmd = hasPlacement ? placement.showCmd : SW_SHOWNORMAL;
+        if (showCmd != SW_SHOWMAXIMIZED &&
+            (showCmd == SW_SHOWMINIMIZED || IsIconic(hwnd) ||
+             rect.Left <= -30000 || rect.Top <= -30000 ||
+             rect.Width < 200 || rect.Height < 200))
+        {
+            if (hasPlacement &&
+                placement.rcNormalPosition.Width >= 200 &&
+                placement.rcNormalPosition.Height >= 200)
+            {
+                rect = placement.rcNormalPosition;
+            }
+            showCmd = SW_SHOWNORMAL;
+        }
+        rect = ClampRect(rect);
+        var visible = IsWindowVisible(hwnd);
+        var previousOwner = GetWindow(hwnd, GW_OWNER);
+        if (previousOwner != IntPtr.Zero && !IsWindow(previousOwner))
+        {
+            previousOwner = IntPtr.Zero;
+        }
+
+        if ((style & WS_CAPTION) == 0)
+        {
+            var repaired = style |
+                WS_CAPTION | WS_SYSMENU |
+                WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME;
+            var frame = FrameForStyle(hwnd, repaired);
+            rect = new RECT
+            {
+                Left = frame.Left,
+                Top = frame.Top,
+                Right = frame.Right,
+                Bottom = frame.Bottom,
+            };
+            style = repaired;
+            _log("gameview captionless leftover repaired");
+        }
+
+        var capture = new Capture
+        {
+            Hwnd = hwnd,
+            Pid = pid,
+            PreviousOwner = previousOwner,
+            Style = style,
+            Rect = rect.ToRectangle(),
+            ShowCmd = showCmd,
+            Visible = visible,
+        };
+        SaveRestoreState(capture);
+        _log($"gameview capture hwnd=0x{hwnd.ToInt64():X} " +
+             $"original={capture.Rect.Width}x{capture.Rect.Height} " +
+             $"at {capture.Rect.Left},{capture.Rect.Top} " +
+             $"showCmd={capture.ShowCmd}");
+        return capture;
     }
 
     private void Watch()
     {
-        if (!_active || _disposed) return;
+        if (_disposed) return;
+        if (_state == GameWindowState.Unavailable && _attachWanted)
+        {
+            TryAttach();
+            return;
+        }
+        if (_state != GameWindowState.Attached &&
+            _state != GameWindowState.Attaching)
+        {
+            return;
+        }
         if (_game == IntPtr.Zero || !IsWindow(_game))
         {
-            ResetGameHandle();
-            AttachOrUpdate();
+            HandleLost();
+            return;
+        }
+        if (_dashboard.WindowState == FormWindowState.Minimized)
+        {
             return;
         }
 
+        var generation = _generation;
+        if (GetWindow(_game, GW_OWNER) != _dashboard.Handle)
+        {
+            TryAttach();
+            return;
+        }
         EnsureCaptionlessStyle();
-        if (!IsWindowVisible(_game))
+        if (generation != _generation) return;
+
+        if (_state == GameWindowState.Attached)
         {
-            ShowWindow(_game, SW_SHOWNOACTIVATE);
-        }
-        GetWindowRect(_game, out var frame);
-        var current = frame.ToRectangle();
-        if (_appliedFrame.Width <= 0 ||
-            Math.Abs(current.Left - _appliedFrame.Left) > 8 ||
-            Math.Abs(current.Top - _appliedFrame.Top) > 8 ||
-            Math.Abs(current.Width - _appliedFrame.Width) > 8 ||
-            Math.Abs(current.Height - _appliedFrame.Height) > 8)
-        {
-            ApplyLayout();
+            if (!IsWindowVisible(_game))
+            {
+                ShowWindow(_game, SW_SHOWNOACTIVATE);
+            }
+            GetWindowRect(_game, out var frame);
+            var current = frame.ToRectangle();
+            if (_appliedFrame.Width <= 0 ||
+                Math.Abs(current.Left - _appliedFrame.Left) > 8 ||
+                Math.Abs(current.Top - _appliedFrame.Top) > 8 ||
+                Math.Abs(current.Width - _appliedFrame.Width) > 8 ||
+                Math.Abs(current.Height - _appliedFrame.Height) > 8)
+            {
+                ApplyLayout();
+            }
         }
     }
 
-    private void AttachOrUpdate()
+    private void HandleLost()
     {
-        if (!_active || _disposed) return;
-        if (_game != IntPtr.Zero && IsWindow(_game))
+        _generation += 1;
+        _settle.Stop();
+        _watch.Stop();
+        _game = IntPtr.Zero;
+        _capture = null;
+        DeleteRestoreState();
+        SetState(GameWindowState.Unavailable, "游戏窗口已关闭");
+        if (_attachWanted)
         {
-            if (!_ownerSet)
-            {
-                _previousOwner = GetWindow(_game, GW_OWNER);
-                SetWindowLongPtrW(_game, GWLP_HWNDPARENT, _dashboard.Handle);
-                _ownerSet = GetWindow(_game, GW_OWNER) == _dashboard.Handle;
-            }
-            if (!_ownerSet)
-            {
-                PostState("error", "无法把游戏窗口设为仪表盘 owner");
-                return;
-            }
-            if (_captureGame)
-            {
-                SaveRestoreState(
-                    _game, _gamePid, _originalStyle, _originalRect,
-                    _originalVisible);
-            }
-            EnsureCaptionlessStyle();
-            ApplyLayout();
-            BeginSettle();
-            PostState("attached", "游戏窗口已吸附");
-            return;
-        }
-
-        var process = FindGameProcess();
-        if (process is null)
-        {
-            PostState("waiting", "等待 Arknights 窗口…");
-            return;
-        }
-
-        try
-        {
-            process.Refresh();
-            var hwnd = FindGameWindow((uint)process.Id);
-            if (hwnd == IntPtr.Zero || !IsWindow(hwnd))
-            {
-                PostState("waiting", "游戏进程已找到，等待主窗口…");
-                return;
-            }
-
-            _game = hwnd;
-            _gamePid = process.Id;
-            _captureGame = true;
-            _previousOwner = GetWindow(hwnd, GW_OWNER);
-            _originalStyle = GetWindowLongPtrW(hwnd, GWL_STYLE).ToInt64();
-            _originalVisible = IsWindowVisible(hwnd);
-            GetWindowRect(hwnd, out var original);
-            GetClientRect(hwnd, out var client);
-            _originalRect = original.ToRectangle();
-            _originalClientWidth = client.Width;
-            _originalClientHeight = client.Height;
-            _appliedFrame = Rectangle.Empty;
-
-            var saved = LoadRestoreState();
-            if (saved is not null && saved.Hwnd == hwnd.ToInt64() &&
-                saved.Pid == process.Id)
-            {
-                _originalStyle = saved.Style;
-                _originalRect = Rectangle.FromLTRB(
-                    saved.Left, saved.Top, saved.Right, saved.Bottom);
-                _originalVisible = saved.Visible;
-                _log("gameview original state restored from file");
-            }
-            else if ((_originalStyle & WS_CAPTION) == 0)
-            {
-                var repaired = _originalStyle |
-                    WS_CAPTION | WS_SYSMENU |
-                    WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME;
-                _originalRect = FrameForStyle(hwnd, repaired);
-                _originalStyle = repaired;
-                _log("gameview captionless leftover repaired");
-            }
-            SaveRestoreState(
-                hwnd, process.Id, _originalStyle, _originalRect,
-                _originalVisible);
-
-            SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, _dashboard.Handle);
-            _ownerSet = GetWindow(hwnd, GW_OWNER) == _dashboard.Handle;
-            _log($"gameview attach pid={process.Id} hwnd=0x{hwnd.ToInt64():X} " +
-                 $"ownerOk={_ownerSet} original={_originalRect.Width}x{_originalRect.Height}");
-            if (!_ownerSet)
-            {
-                ResetGameHandle();
-                PostState("error", "无法把游戏窗口设为仪表盘 owner");
-                return;
-            }
-
-            EnsureCaptionlessStyle();
-            ApplyLayout();
-            BeginSettle();
-            PostState("attached", "游戏窗口已吸附");
-        }
-        catch (Exception error)
-        {
-            _log("gameview attach failed: " + error);
-            PostState("error", error.Message);
-        }
-        finally
-        {
-            process.Dispose();
+            _watch.Start();
         }
     }
 
-    private void ApplyLayout()
+    private bool ApplyLayout()
     {
         if (_game == IntPtr.Zero || !IsWindow(_game) ||
             _cssWidth <= 1 || _cssHeight <= 1)
         {
-            return;
+            return false;
         }
 
         try
@@ -329,10 +682,12 @@ internal sealed class GameWindowAttachment : IDisposable
             _log($"gameview layout client={finalClient.Width}x{finalClient.Height} " +
                  $"frame={_appliedFrame.Width}x{_appliedFrame.Height} " +
                  $"at {_appliedFrame.Left},{_appliedFrame.Top} dpr={_dpr:0.##}");
+            return true;
         }
         catch (Exception error)
         {
             _log("gameview layout failed: " + error);
+            return false;
         }
     }
 
@@ -354,10 +709,13 @@ internal sealed class GameWindowAttachment : IDisposable
         }
     }
 
-    private void BeginSettle()
+    private void BeginSettle(bool focusGame = true)
     {
         if (_disposed || _game == IntPtr.Zero || !IsWindow(_game)) return;
+        if (_dashboard.WindowState == FormWindowState.Minimized) return;
+        _settleGeneration = _generation;
         _settleTicks = 12;
+        _settleFocusGame = focusGame;
         _settle.Stop();
         _settle.Start();
         _log($"gameview present begin hwnd=0x{_game.ToInt64():X} " +
@@ -367,9 +725,15 @@ internal sealed class GameWindowAttachment : IDisposable
 
     private void SettleTick()
     {
-        if (_game == IntPtr.Zero || !IsWindow(_game))
+        if (_state != GameWindowState.Attached ||
+            _generation != _settleGeneration ||
+            _game == IntPtr.Zero || !IsWindow(_game))
         {
             _settle.Stop();
+            return;
+        }
+        if (_dashboard.WindowState == FormWindowState.Minimized)
+        {
             return;
         }
 
@@ -380,7 +744,8 @@ internal sealed class GameWindowAttachment : IDisposable
                 ShowWindow(_game,
                     IsIconic(_game) ? SW_RESTORE : SW_SHOWNOACTIVATE);
             }
-            if (_settleTicks == 11 || _settleTicks == 9)
+            if (_settleFocusGame &&
+                (_settleTicks == 11 || _settleTicks == 9))
             {
                 SetForegroundWindow(_game);
             }
@@ -423,81 +788,40 @@ internal sealed class GameWindowAttachment : IDisposable
             SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
     }
 
-    private void ResetGameHandle()
+    private void SetState(GameWindowState state, string message)
     {
-        _game = IntPtr.Zero;
-        _gamePid = 0;
-        _ownerSet = false;
-        _captureGame = false;
-        _appliedFrame = Rectangle.Empty;
+        _state = state;
+        _message = message;
+        PostState();
     }
 
-    private void Detach(
-        bool hideAfterRestore, bool keepHandle = false, bool forceShow = false)
+    private void PostState()
     {
-        if (_game == IntPtr.Zero || !IsWindow(_game))
+        var ownerOk = _game != IntPtr.Zero && IsWindow(_game) &&
+            GetWindow(_game, GW_OWNER) == _dashboard.Handle;
+        var visible = _game != IntPtr.Zero && IsWindow(_game) &&
+            IsWindowVisible(_game);
+        _post(new
         {
-            ResetGameHandle();
-            return;
-        }
-
-        try
-        {
-            if (_ownerSet)
-            {
-                SetWindowLongPtrW(_game, GWLP_HWNDPARENT, _previousOwner);
-            }
-            if (_captureGame)
-            {
-                SetWindowLongPtrW(_game, GWL_STYLE, new IntPtr(_originalStyle));
-                SetWindowPos(
-                    _game, IntPtr.Zero,
-                    _originalRect.Left, _originalRect.Top,
-                    _originalRect.Width, _originalRect.Height,
-                    SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
-                DeleteRestoreState();
-            }
-            ShowWindow(_game,
-                hideAfterRestore
-                    ? SW_HIDE
-                    : (forceShow || _originalVisible
-                        ? SW_SHOWNOACTIVATE
-                        : SW_HIDE));
-            if (forceShow)
-            {
-                if (IsIconic(_game))
-                {
-                    ShowWindow(_game, SW_RESTORE);
-                }
-                ShowWindow(_game, SW_SHOW);
-                GetWindowRect(_game, out var current);
-                SetWindowPos(
-                    _game, IntPtr.Zero,
-                    current.Left, current.Top,
-                    current.Width, current.Height,
-                    SWP_SHOWWINDOW);
-                SetForegroundWindow(_game);
-                BeginSettle();
-            }
-            GetWindowRect(_game, out var restored);
-            _log($"gameview detached and restored " +
-                 $"frame={restored.Width}x{restored.Height} " +
-                 $"at {restored.Left},{restored.Top} " +
-                 $"visible={IsWindowVisible(_game)}");
-        }
-        catch (Exception error)
-        {
-            _log("gameview detach failed: " + error);
-        }
-        finally
-        {
-            _ownerSet = false;
-            if (!keepHandle)
-            {
-                ResetGameHandle();
-            }
-        }
+            type = "gameview-state",
+            state = StateName(_state),
+            requestId = _requestId,
+            ownerOk,
+            visible,
+            message = _message,
+        });
     }
+
+    private static string StateName(GameWindowState state) =>
+        state switch
+        {
+            GameWindowState.Unavailable => "unavailable",
+            GameWindowState.Detached => "detached",
+            GameWindowState.Attaching => "attaching",
+            GameWindowState.Attached => "attached",
+            GameWindowState.Hidden => "hidden",
+            _ => "error",
+        };
 
     private Process? FindGameProcess()
     {
@@ -616,6 +940,39 @@ internal sealed class GameWindowAttachment : IDisposable
             origin.Y + frame.Bottom);
     }
 
+    private static RECT ClampRect(RECT rect)
+    {
+        var screen = SystemInformation.VirtualScreen;
+        var width = rect.Width;
+        var height = rect.Height;
+        if (width < 200 || height < 200)
+        {
+            width = 1622;
+            height = 956;
+        }
+        var left = rect.Left;
+        var top = rect.Top;
+        var offScreen =
+            left < screen.Left - 50 ||
+            top < screen.Top - 50 ||
+            left > screen.Right - 100 ||
+            top > screen.Bottom - 100 ||
+            rect.Width < 200 || rect.Height < 200;
+        if (offScreen)
+        {
+            var work = SystemInformation.WorkingArea;
+            left = work.Left + Math.Max(0, (work.Width - width) / 2);
+            top = work.Top + Math.Max(0, (work.Height - height) / 2);
+        }
+        return new RECT
+        {
+            Left = left,
+            Top = top,
+            Right = left + width,
+            Bottom = top + height,
+        };
+    }
+
     private static RestoreState? LoadRestoreState()
     {
         try
@@ -630,8 +987,7 @@ internal sealed class GameWindowAttachment : IDisposable
         }
     }
 
-    private static void SaveRestoreState(
-        IntPtr hwnd, int pid, long style, Rectangle rect, bool visible)
+    private static void SaveRestoreState(Capture capture)
     {
         try
         {
@@ -641,14 +997,16 @@ internal sealed class GameWindowAttachment : IDisposable
                 RestoreStatePath,
                 JsonSerializer.Serialize(new RestoreState
                 {
-                    Hwnd = hwnd.ToInt64(),
-                    Pid = pid,
-                    Style = style,
-                    Left = rect.Left,
-                    Top = rect.Top,
-                    Right = rect.Right,
-                    Bottom = rect.Bottom,
-                    Visible = visible,
+                    Hwnd = capture.Hwnd.ToInt64(),
+                    Pid = capture.Pid,
+                    PreviousOwner = capture.PreviousOwner.ToInt64(),
+                    Style = capture.Style,
+                    Left = capture.Rect.Left,
+                    Top = capture.Rect.Top,
+                    Right = capture.Rect.Right,
+                    Bottom = capture.Rect.Bottom,
+                    ShowCmd = capture.ShowCmd,
+                    Visible = capture.Visible,
                 }));
         }
         catch
@@ -670,25 +1028,25 @@ internal sealed class GameWindowAttachment : IDisposable
         }
     }
 
-    private void PostState(string state, string message)
-    {
-        _post(new
-        {
-            type = "gameview-state",
-            state,
-            message,
-        });
-    }
-
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
+        _attachWanted = false;
+        _dashboard.Resize -= OnDashboardStateChanged;
+        _dashboard.VisibleChanged -= OnDashboardStateChanged;
         _watch.Stop();
         _watch.Dispose();
         _settle.Stop();
         _settle.Dispose();
-        Detach(hideAfterRestore: false, forceShow: true);
+        if (_capture is not null &&
+            _game != IntPtr.Zero && IsWindow(_game))
+        {
+            RestoreWindow(show: true, hide: false);
+            DeleteRestoreState();
+        }
+        _game = IntPtr.Zero;
+        _capture = null;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -709,6 +1067,35 @@ internal sealed class GameWindowAttachment : IDisposable
     {
         public int X;
         public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WINDOWPLACEMENT
+    {
+        public int Length;
+        public int Flags;
+        public int ShowCmd;
+        public POINT MinPosition;
+        public POINT MaxPosition;
+        public RECT NormalPosition;
+
+        public int length
+        {
+            get => Length;
+            set => Length = value;
+        }
+
+        public int showCmd
+        {
+            get => ShowCmd;
+            set => ShowCmd = value;
+        }
+
+        public RECT rcNormalPosition
+        {
+            get => NormalPosition;
+            set => NormalPosition = value;
+        }
     }
 
     private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
@@ -758,6 +1145,13 @@ internal sealed class GameWindowAttachment : IDisposable
 
     [DllImport("user32.dll")]
     private static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsZoomed(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowPlacement(
+        IntPtr hWnd, ref WINDOWPLACEMENT placement);
 
     [DllImport("user32.dll")]
     private static extern bool RedrawWindow(

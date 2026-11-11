@@ -112,6 +112,7 @@
     filter: "all",
     viewMode: "detail",
     followLive: true,
+    autoPan: true,
     lastFrameAdvanceAt: 0,
     jumpMode: "normal",
     resultRevisionSeen: 0,
@@ -199,6 +200,7 @@
     state.selectedEventId = "";
     state.nodeRender.clear();
     state.followLive = true;
+    state.autoPan = true;
     state.rewinding = false;
     state.rewindStartedAt = 0;
   }
@@ -832,6 +834,7 @@
     dom.cursor.style.top = `${node.render.y - 4}px`;
     dom.cursor.style.height = `${node.render.height + 8}px`;
     dom.cursorFlag.textContent = `F${state.frame}`;
+    ensureCursorVisible(nodes, live);
   }
 
   function renderGameCursor(nodes, live) {
@@ -1058,10 +1061,14 @@
       "aria-pressed", state.jumpMode === "normal" ? "true" : "false");
     dom.jumpModeFast.setAttribute(
       "aria-pressed", state.jumpMode === "fast" ? "true" : "false");
-    dom.followPlayback.disabled = !live || state.followLive;
-    dom.followPlayback.title = state.followLive
-      ? "已经在跟随当前录像位置"
-      : "回到当前录像播放位置并持续跟随";
+    const following = state.followLive && state.autoPan;
+    dom.followPlayback.disabled = !live || following;
+    dom.followPlayback.textContent = state.followLive && !state.autoPan
+      ? "恢复跟随"
+      : "跟随";
+    dom.followPlayback.title = following
+      ? "已经在跟随当前位置"
+      : "回到当前播放位置并持续跟随";
     dom.frameReadout.textContent = formatFrame(state.frame);
     dom.totalReadout.textContent = formatFrame(totalFrames(nodes));
     dom.deleteSegment.disabled = !live || !selection || !selection.parentId;
@@ -1120,7 +1127,8 @@
       state.timeline?.jumping, state.snapshot?.paused,
       state.rewinding,
       state.snapshot?.result,
-      state.jumpMode, laneNodeId, state.timeline?.damage_hits?.length || 0,
+      state.jumpMode, state.autoPan, laneNodeId,
+      state.timeline?.damage_hits?.length || 0,
       state.unitNames.size, nodes.map((node) => `${node.id}:${node.end}`).join(","),
     ].join("|");
     if (!force && signature === lastRenderSignature) return;
@@ -1228,6 +1236,7 @@
     }
     const fast = state.jumpMode === "fast";
     state.followLive = true;
+    state.autoPan = true;
     if (target < snapshotFrame) {
       state.rewinding = true;
       state.rewindEpoch = Number(state.snapshot?.epoch) || 0;
@@ -1266,6 +1275,7 @@
       !isNodeOnTimelinePath(nodes, nodeId);
     const fast = state.jumpMode === "fast";
     state.followLive = true;
+    state.autoPan = true;
     sendCommand(protocol.commands.replaySeek(target, nodeId, fast));
     const action = switchesBranch
       ? "切换到指针（重新开局）"
@@ -1514,6 +1524,7 @@
     const node = nodes.find((entry) => entry.id === nodeId);
     if (!node) return;
     state.followLive = false;
+    state.autoPan = true;
     state.selectedNodeId = node.id;
     state.branchTargetNodeId =
       (isPlaybackPathDescendant(nodes, node.id) ||
@@ -1539,6 +1550,7 @@
     if (!eventData) return;
     const nodes = timelineNodes();
     state.followLive = false;
+    state.autoPan = true;
     state.selectedEventId = eventData.id;
     state.branchTargetNodeId = "";
     state.frame = eventData.frame;
@@ -1562,9 +1574,49 @@
     dom.treeScroll.scrollTop = clamp(node.render.centerY - viewport.height / 2, 0, maxTop);
   }
 
+  function ensureCursorVisible(nodes, live) {
+    if (!state.autoPan || pointerHeld) return;
+    if (!live || state.viewMode === "overview") return;
+    const frame = Number(state.frame) || 0;
+    const nodeId = state.followLive
+      ? (playbackNodeAtFrame(nodes, frame)?.id || timelineCurrentNodeId(nodes))
+      : (state.selectedNodeId || timelineCurrentNodeId(nodes));
+    const node = nodes.find((entry) => entry.id === nodeId);
+    if (!node?.render) return;
+    const view = dom.treeScroll;
+    const viewportWidth = view.clientWidth;
+    const viewportHeight = view.clientHeight;
+    if (viewportWidth < 2 || viewportHeight < 2) return;
+
+    const x = nodeFrameX(node, frame);
+    const y = node.render.y;
+    const height = node.render.height;
+    const marginX = Math.min(120, viewportWidth * 0.16);
+    const marginY = Math.min(48, viewportHeight * 0.18);
+    let left = view.scrollLeft;
+    let top = view.scrollTop;
+
+    if (x < left + marginX) left = x - marginX;
+    else if (x > left + viewportWidth - marginX) {
+      left = x - viewportWidth + marginX;
+    }
+    if (y < top + marginY) top = y - marginY;
+    else if (y + height > top + viewportHeight - marginY) {
+      top = y + height - viewportHeight + marginY;
+    }
+
+    const maxLeft = Math.max(0, view.scrollWidth - viewportWidth);
+    const maxTop = Math.max(0, view.scrollHeight - viewportHeight);
+    left = clamp(left, 0, maxLeft);
+    top = clamp(top, 0, maxTop);
+    if (Math.abs(left - view.scrollLeft) >= 1) view.scrollLeft = left;
+    if (Math.abs(top - view.scrollTop) >= 1) view.scrollTop = top;
+  }
+
   function onTabActivated() {
     state.timelineRequested = true;
     state.followLive = true;
+    state.autoPan = true;
     const idle = isIdleSnapshot(state.snapshot);
     if (idle) clearTimelineState();
     const nodes = timelineNodes();
@@ -1655,6 +1707,7 @@
     if (newNode) {
       state.selectedNodeId = currentId;
       state.followLive = true;
+      state.autoPan = true;
       state.frame = Number(state.snapshot?.frame) || state.frame;
     } else if (state.followLive && payload?.current_id) {
       state.selectedNodeId = payload.current_id;
@@ -1697,7 +1750,89 @@
     }
   }
 
+  function bindTreePan() {
+    const view = dom.treeScroll;
+    if (!view) return;
+    let pan = null;
+    let suppressClick = false;
+    const interactive = (target) =>
+      target instanceof Element && !!target.closest(
+        ".tas-node, .tas-node-event, [data-child-id], " +
+        "button, input, select, textarea, label, a",
+      );
+
+    view.addEventListener("pointerdown", (event) => {
+      if (event.pointerType === "mouse" &&
+          event.button !== 0 && event.button !== 1) {
+        return;
+      }
+      if (event.button === 0 && interactive(event.target)) return;
+      if (event.button === 1) event.preventDefault();
+      pan = {
+        id: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+        left: view.scrollLeft,
+        top: view.scrollTop,
+        moved: false,
+      };
+      suppressClick = false;
+      try {
+        view.setPointerCapture(event.pointerId);
+      } catch {
+      }
+    });
+
+    view.addEventListener("pointermove", (event) => {
+      if (!pan || event.pointerId !== pan.id) return;
+      const dx = event.clientX - pan.x;
+      const dy = event.clientY - pan.y;
+      if (!pan.moved && Math.hypot(dx, dy) < 4) return;
+      pan.moved = true;
+      event.preventDefault();
+      view.classList.add("is-panning");
+      view.scrollLeft = pan.left - dx;
+      view.scrollTop = pan.top - dy;
+    });
+
+    const finish = (event) => {
+      if (!pan || (event && event.pointerId !== pan.id)) return;
+      const moved = pan.moved;
+      const pointerId = pan.id;
+      view.classList.remove("is-panning");
+      try {
+        if (view.hasPointerCapture(pointerId)) {
+          view.releasePointerCapture(pointerId);
+        }
+      } catch {
+      }
+      pan = null;
+      if (moved) {
+        suppressClick = true;
+        state.autoPan = false;
+        scheduleFullRender();
+        setTimeout(() => {
+          suppressClick = false;
+        }, 350);
+      }
+    };
+    view.addEventListener("pointerup", finish);
+    view.addEventListener("pointercancel", finish);
+    view.addEventListener("click", (event) => {
+      if (!suppressClick) return;
+      suppressClick = false;
+      event.preventDefault();
+      event.stopPropagation();
+    }, true);
+    view.addEventListener("wheel", (event) => {
+      if (!event.deltaX && !event.deltaY) return;
+      state.autoPan = false;
+      scheduleFullRender();
+    }, { passive: true });
+  }
+
   function bind() {
+    bindTreePan();
     dom.saveTimeline.addEventListener("click", openSaveTimeline);
     dom.loadTimeline.addEventListener("click", openLoadTimeline);
     dom.saveBrowse.addEventListener("click", () => post({
@@ -1730,6 +1865,7 @@
       const frame = currentPlaybackFrame();
       const node = playbackNodeAtFrame(nodes, frame);
       state.followLive = true;
+      state.autoPan = true;
       state.frame = frame;
       state.selectedNodeId = node?.id || timelineCurrentNodeId(nodes);
       state.branchTargetNodeId = "";

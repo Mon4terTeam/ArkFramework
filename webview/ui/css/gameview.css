@@ -33,7 +33,20 @@
 
 .gameview-toolbar .button-row {
   flex: none;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 8px;
   margin: 0;
+}
+
+.gameview-stage-label {
+  min-width: 0;
+  max-width: min(42vw, 420px);
+  overflow: hidden;
+  color: var(--text-2);
+  font: 10.5px/1.4 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .gameview-layout {
@@ -67,6 +80,8 @@
 .gameview-list-tabs {
   flex: 1;
   min-width: 0;
+  width: 100%;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .gameview-list-tabs button {
@@ -241,6 +256,15 @@
 
 .gameview-detail .panel-head {
   flex: none;
+}
+
+.gameview-detail-tabs {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.gameview-detail-tabs button {
+  min-width: 0;
+  padding: 8px 6px;
 }
 
 .gameview-detail-title {

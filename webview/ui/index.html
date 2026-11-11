@@ -224,7 +224,8 @@
                 游戏窗口保持独立，点击“吸附游戏”后进入布局
               </span>
             </div>
-            <div class="button-row">
+            <div class="button-row gameview-toolbar-actions">
+              <span class="gameview-stage-label" id="gameviewStageLabel">关卡 --</span>
               <button class="btn primary" id="gameviewAttachButton" type="button">吸附游戏</button>
               <button class="btn ghost" id="gameviewDetachButton" type="button" disabled>解除吸附</button>
             </div>
@@ -239,7 +240,6 @@
                   <button type="button" data-gameview-list="enemies"
                     role="tab" aria-selected="false">敌方</button>
                 </div>
-                <span class="badge" id="gameviewListCount">0</span>
               </div>
               <div class="gameview-rail-list" id="gameviewRailList">
                 <div class="empty-small">等待战斗数据</div>
@@ -256,7 +256,15 @@
             </div>
 
             <aside class="panel gameview-detail">
-              <div class="panel-head">
+              <div class="battle-right-tabs gameview-detail-tabs"
+                id="gameviewDetailTabs" role="tablist" aria-label="单位信息">
+                <button type="button" class="is-active" data-gameview-detail="detail"
+                  role="tab" aria-selected="true">详情</button>
+                <button type="button" data-gameview-detail="global"
+                  role="tab" aria-selected="false">全局效果
+                  <span id="gameviewGlobalCount">0</span></button>
+              </div>
+              <div class="panel-head" id="gameviewDetailHeader">
                 <div class="gameview-detail-title">
                   <span class="section-label" id="gameviewDetailKind">干员详情</span>
                   <h3 id="gameviewDetailName">未选择单位</h3>
@@ -266,6 +274,16 @@
               </div>
               <div class="gameview-detail-body" id="gameviewDetailBody">
                 <div class="empty-small">等待游戏数据</div>
+              </div>
+              <div class="panel-head" id="gameviewGlobalHeader" hidden>
+                <div class="gameview-detail-title">
+                  <span class="section-label">全局效果</span>
+                  <h3>全局效果 / 藏品</h3>
+                  <span class="gameview-detail-meta" id="gameviewGlobalMeta"></span>
+                </div>
+              </div>
+              <div class="gameview-detail-body" id="gameviewGlobalBody" hidden>
+                <div class="empty-small">等待全局效果</div>
               </div>
             </aside>
 
@@ -402,6 +420,12 @@
                 <div class="section-label">难度</div>
                 <select id="configDifficulty" class="config-select" aria-label="肉鸽难度"></select>
                 <p id="configDifficultyDesc" class="config-note"></p>
+              </div>
+              <div class="config-sidebar-section">
+                <div class="section-label">层数</div>
+                <input id="configZone" class="config-number" type="number"
+                  min="1" max="99" step="1" aria-label="当前层数">
+                <p class="config-note">当前第几层，每进入新一层难度成长叠加一次。</p>
               </div>
               <div class="config-sidebar-section">
                 <div class="section-label">当前配置</div>
@@ -632,7 +656,7 @@
               <button class="btn tiny" data-step="-1" type="button" title="指针回退 1 帧">−1</button>
               <button class="btn tiny" id="playButton" type="button" aria-label="刷新时间轴" title="刷新时间轴">↻</button>
               <button class="btn tiny" id="followPlayback" type="button"
-                      title="回到当前录像播放位置并持续跟随">跟随录像</button>
+                title="回到当前播放位置并持续跟随">跟随</button>
               <button class="btn tiny" id="timelinePauseButton" data-action="pause" type="button" title="暂停逻辑帧推进">暂停</button>
               <button class="btn tiny primary" id="timelineResumeButton" data-action="resume" type="button" title="继续逻辑帧推进">继续</button>
               <button class="btn tiny" data-step="1" type="button" title="指针前进 1 帧">+1</button>
@@ -777,7 +801,13 @@
                 </div>
               </div>
               <div class="enemy-detail-section">
-                <div class="section-label">当前属性</div>
+                <div class="enemy-stat-head">
+                  <div class="section-label">当前属性</div>
+                  <label class="enemy-panel-toggle" for="enemyPanelToggle">
+                    <input type="checkbox" id="enemyPanelToggle" data-enemy-panel-toggle>
+                    <span>显示计算过程</span>
+                  </label>
+                </div>
                 <div class="enemy-stat-grid" id="enemyStatGrid"></div>
               </div>
               <div class="enemy-detail-section">
