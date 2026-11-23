@@ -66,6 +66,10 @@ constexpr std::uint32_t kTraceSkillRemaining = 1u << 8;
 constexpr std::uint32_t kTraceSkillTrigger = 1u << 9;
 constexpr std::uint32_t kTraceSkillBeginAnim = 1u << 10;
 constexpr std::uint32_t kTraceStateId = 1u << 12;
+constexpr std::uint32_t kTraceSkillAmmo = 1u << 13;
+constexpr std::uint32_t kTraceSkillOverload = 1u << 14;
+constexpr std::uint32_t kTraceMode = 1u << 15;
+constexpr std::uint32_t kTraceSkillCharge = 1u << 16;
 constexpr std::uint32_t kTraceDefault =
     kTraceState | kTraceCost | kTraceHp | kTraceSp | kTraceSkill |
     kTraceSkillAffect | kTraceAlive;
@@ -313,6 +317,9 @@ void* find_tile(il2cpp::Runtime& runtime, void* controller, void* controller_cla
 void* find_character(il2cpp::Runtime& runtime, void* controller, void* controller_class,
                      std::uint32_t uid);
 
+void* find_entity_uid(il2cpp::Runtime& runtime, void* controller,
+                      void* controller_class, std::uint32_t uid);
+
 void* find_card(il2cpp::Runtime& runtime, void* controller, void* controller_class,
                 std::uint32_t uid, void** deck_out);
 
@@ -324,6 +331,11 @@ void collect_buff_uid_map(il2cpp::Runtime& runtime, void* map, void* buff_class,
 
 void collect_buff_internal_list(il2cpp::Runtime& runtime, void* list, void* buff_class,
                                 std::vector<void*>& output, std::unordered_set<void*>& seen);
+
+void collect_buff_descendants(il2cpp::Runtime& runtime, void* buff,
+                              void* buff_class,
+                              std::vector<void*>& output,
+                              std::unordered_set<void*>& seen, int& budget);
 
 std::string join_nonempty(const std::vector<std::string>& values, const char* separator);
 
@@ -364,6 +376,10 @@ void read_entity_buffs(il2cpp::Runtime& runtime, void* entity, void* entity_clas
                        std::uint64_t& cache_misses,
                        std::vector<UnitInfo::BuffInfo>& output,
                        int* shield_layers = nullptr);
+
+void collect_attribute_contributions(
+    const std::vector<UnitInfo::BuffInfo>& buffs,
+    std::vector<AttributeContribution>& output);
 
 void write_type_dump(il2cpp::Runtime& runtime, const std::filesystem::path& path,
                      void* klass);

@@ -888,6 +888,30 @@
                 </div>
                 <div id="damageTypeGrid" class="damage-type-grid"></div>
               </article>
+              <div class="damage-breakdown-grid">
+                <article class="panel">
+                  <div class="panel-head">
+                    <div>
+                      <h3>分目标统计</h3>
+                      <span class="damage-subtle">当前干员对每个目标的实际伤害/治疗</span>
+                    </div>
+                  </div>
+                  <div id="damageTargetList" class="damage-breakdown-list">
+                    <div class="empty-small">等待分目标数据</div>
+                  </div>
+                </article>
+                <article class="panel">
+                  <div class="panel-head">
+                    <div>
+                      <h3>Buff 归因</h3>
+                      <span class="damage-subtle" id="damageAttributionHint">Shapley 归因；未建模部分单列</span>
+                    </div>
+                  </div>
+                  <div id="damageAttributionList" class="damage-breakdown-list">
+                    <div class="empty-small">等待归因数据</div>
+                  </div>
+                </article>
+              </div>
               <article class="panel damage-chart-panel">
                 <div class="panel-head">
                   <div>

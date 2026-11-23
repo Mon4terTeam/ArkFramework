@@ -369,6 +369,57 @@
   font-family: var(--font-mono);
 }
 
+.damage-breakdown-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.damage-breakdown-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-height: 250px;
+  overflow: auto;
+}
+
+.damage-breakdown-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-2, rgba(255, 255, 255, .025));
+  font-size: 11px;
+}
+
+.damage-breakdown-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.damage-breakdown-row .damage-breakdown-meta {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.damage-breakdown-row .damage-breakdown-value {
+  min-width: 72px;
+  text-align: right;
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+
+.damage-breakdown-row.is-negative .damage-breakdown-value {
+  color: #e6a06a;
+}
+
 @media (max-width: 1100px) {
   .damage-page-layout {
     grid-template-columns: 1fr;
@@ -384,6 +435,10 @@
 
   .damage-legend {
     max-width: 100%;
+  }
+
+  .damage-breakdown-grid {
+    grid-template-columns: 1fr;
   }
 }
 

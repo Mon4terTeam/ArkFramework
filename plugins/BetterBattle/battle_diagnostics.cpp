@@ -614,7 +614,12 @@ void LocalBattle::method_at(const std::string& text) {
         }
         const std::uint64_t base =
             reinterpret_cast<std::uint64_t>(module);
-        std::vector<std::pair<std::uint64_t, std::string>> targets;
+        struct Target {
+            std::uint64_t begin = 0;
+            std::uint64_t end = 0;
+            std::string text;
+        };
+        std::vector<Target> targets;
         std::size_t begin = 0;
         while (begin <= text.size()) {
             const std::size_t end = text.find(',', begin);
@@ -628,14 +633,26 @@ void LocalBattle::method_at(const std::string& text) {
             if (item.empty()) {
                 continue;
             }
+            const std::size_t dash = item.find('-');
+            if (dash != std::string::npos) {
+                const std::uint64_t begin_rva =
+                    std::strtoull(item.substr(0, dash).c_str(), nullptr, 0);
+                const std::uint64_t end_rva =
+                    std::strtoull(item.substr(dash + 1).c_str(), nullptr, 0);
+                if (end_rva > begin_rva) {
+                    targets.push_back(
+                        Target{base + begin_rva, base + end_rva, item});
+                }
+                continue;
+            }
             const std::uint64_t rva =
                 std::strtoull(item.c_str(), nullptr, 0);
-            targets.emplace_back(base + rva, item);
+            targets.push_back(Target{base + rva, base + rva + 1, item});
         }
         std::ostringstream output;
-        for (const auto& [address, text] : targets) {
-            output << "target " << text << " -> 0x" << std::hex << address
-                   << std::dec << "\n";
+        for (const Target& target : targets) {
+            output << "target " << target.text << " -> 0x" << std::hex
+                   << target.begin << "..0x" << target.end << std::dec << "\n";
         }
         std::size_t matches = 0;
         std::size_t assembly_count = 0;
@@ -658,13 +675,14 @@ void LocalBattle::method_at(const std::string& text) {
                 while (void* method = runtime_.class_methods(klass, &method_iterator)) {
                     const std::uint64_t entry = reinterpret_cast<std::uint64_t>(
                         *static_cast<void**>(method));
-                    for (const auto& [address, text] : targets) {
-                        if (entry != address) {
+                    for (const Target& target : targets) {
+                        if (entry < target.begin || entry >= target.end) {
                             continue;
                         }
                         ++matches;
                         const char* name_space = runtime_.class_namespace(klass);
-                        output << "match " << text << " "
+                        output << "match " << target.text << " 0x" << std::hex
+                               << (entry - base) << std::dec << " "
                                << (name_space ? name_space : "") << "."
                                << runtime_.klass_name(klass) << "."
                                << (runtime_.method_name(method)

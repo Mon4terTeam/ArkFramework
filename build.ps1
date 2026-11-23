@@ -73,6 +73,7 @@ $DebugFlags = if ($Release) { @('-g0') } else { @() }
 $StripFlags = if ($Release) { @('-s') } else { @() }
 $IncludeFlags = @(
     (Join-Path $Root 'include'),
+    (Join-Path $Root 'plugins\BetterBattle'),
     $ImGuiRoot,
     (Join-Path $MinHookRoot 'include')
 ) | ForEach-Object { '-I' + $_ }
@@ -91,7 +92,7 @@ $CxxFlags = @('-std=c++20') + $WarningFlags + $DefineFlags +
 $CFlags = $IncludeFlags
 
 $NewestHeader = Get-ChildItem -Path (Join-Path $Root 'include'), (Join-Path $Root 'src'),
-    (Join-Path $Root 'plugins'), (Join-Path $Root 'tests') -Include '*.h' -File -Recurse |
+    (Join-Path $Root 'plugins'), (Join-Path $Root 'custom'), (Join-Path $Root 'tests') -Include '*.h' -File -Recurse |
     Sort-Object LastWriteTimeUtc -Descending |
     Select-Object -First 1 -ExpandProperty LastWriteTimeUtc
 $ScriptTime = (Get-Item -LiteralPath $PSCommandPath).LastWriteTimeUtc
@@ -265,6 +266,14 @@ if ($Target -ne 'Tests') {
         @(Get-Sources 'plugins\common'))
     New-SharedLibrary (Join-Path $PluginDirectory 'BetterBattle.dll') $betterBattleObjects @(
         $ImGuiImportLibrary, '-luser32')
+
+    $customSkillObjects = Invoke-CompileAll (@(Get-Sources 'custom\runtime') +
+        @(Get-Sources 'custom\plugin') +
+        @('plugins\common\il2cpp_runtime.cpp'))
+    New-SharedLibrary (Join-Path $PluginDirectory 'CustomSkills.dll') $customSkillObjects @(
+        '-luser32')
+    Copy-Item -LiteralPath (Join-Path $Root 'custom\runtime\custom_complex_arc.json') `
+        -Destination (Join-Path $Dist 'custom_complex_arc.json') -Force
 
     $webBridgeObjects = Invoke-CompileAll @(Get-Sources 'plugins\web_bridge')
     New-SharedLibrary (Join-Path $PluginDirectory 'web_bridge.dll') $webBridgeObjects @(

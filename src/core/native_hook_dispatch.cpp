@@ -83,8 +83,98 @@ uintptr_t invoke_counted(NativeHookSlot* slot, NativeFunction call, uintptr_t a,
 #endif
 }
 
+uintptr_t invoke_native(void* target, const NativeHookCall& call,
+                        uint32_t argument_count) {
+    using Function5 = uintptr_t (*)(uintptr_t, uintptr_t, uintptr_t,
+                                    uintptr_t, uintptr_t);
+    using Function6 = uintptr_t (*)(uintptr_t, uintptr_t, uintptr_t,
+                                    uintptr_t, uintptr_t, uintptr_t);
+    using Function7 = uintptr_t (*)(uintptr_t, uintptr_t, uintptr_t,
+                                    uintptr_t, uintptr_t, uintptr_t,
+                                    uintptr_t);
+    using Function8 = uintptr_t (*)(uintptr_t, uintptr_t, uintptr_t,
+                                    uintptr_t, uintptr_t, uintptr_t,
+                                    uintptr_t, uintptr_t);
+    switch (argument_count) {
+    case 5:
+        return reinterpret_cast<Function5>(target)(
+            call.values[0], call.values[1], call.values[2], call.values[3],
+            call.values[4]);
+    case 6:
+        return reinterpret_cast<Function6>(target)(
+            call.values[0], call.values[1], call.values[2], call.values[3],
+            call.values[4], call.values[5]);
+    case 7:
+        return reinterpret_cast<Function7>(target)(
+            call.values[0], call.values[1], call.values[2], call.values[3],
+            call.values[4], call.values[5], call.values[6]);
+    case 8:
+        return reinterpret_cast<Function8>(target)(
+            call.values[0], call.values[1], call.values[2], call.values[3],
+            call.values[4], call.values[5], call.values[6], call.values[7]);
+    default:
+        return 0;
+    }
+}
+
+uintptr_t invoke_counted_v2(NativeHookSlot* slot, void* target,
+                            const NativeHookCall& call) {
+    EntryFrame frame{slot, current_entry};
+    current_entry = &frame;
+#if defined(_MSC_VER)
+    __try {
+        return invoke_native(target, call, slot->argument_count);
+    } __finally {
+        current_entry = frame.previous;
+        leave(*slot);
+    }
+#else
+    struct ExitGuard {
+        NativeHookSlot* slot;
+        EntryFrame* previous;
+
+        ~ExitGuard() {
+            current_entry = previous;
+            leave(*slot);
+        }
+    } exit_guard{slot, frame.previous};
+
+    return invoke_native(target, call, slot->argument_count);
+#endif
+}
+
+uintptr_t continue_chain_v2(NativeHookSlot* slot, const NativeHookCall& call);
+
+uintptr_t invoke_counted_chain_v2(NativeHookSlot* slot,
+                                  const NativeHookCall& call) {
+    EntryFrame frame{slot, current_entry};
+    current_entry = &frame;
+#if defined(_MSC_VER)
+    __try {
+        return continue_chain_v2(slot, call);
+    } __finally {
+        current_entry = frame.previous;
+        leave(*slot);
+    }
+#else
+    struct ExitGuard {
+        NativeHookSlot* slot;
+        EntryFrame* previous;
+
+        ~ExitGuard() {
+            current_entry = previous;
+            leave(*slot);
+        }
+    } exit_guard{slot, frame.previous};
+
+    return continue_chain_v2(slot, call);
+#endif
+}
+
 uintptr_t dispatch(NativeHookSlot* slot, bool original, uintptr_t a, uintptr_t b, uintptr_t c,
                    uintptr_t d);
+uintptr_t dispatch_v2(NativeHookSlot* slot, bool original,
+                      const NativeHookCall& call);
 
 uintptr_t call_trampoline(const NativeHookChain* chain, uintptr_t a, uintptr_t b, uintptr_t c,
                           uintptr_t d) {
@@ -100,6 +190,15 @@ uintptr_t continue_chain(NativeHookSlot* slot, uintptr_t a, uintptr_t b, uintptr
     return call_trampoline(slot->chain, a, b, c, d);
 }
 
+uintptr_t continue_chain_v2(NativeHookSlot* slot, const NativeHookCall& call) {
+    auto* next = slot->next.load(std::memory_order_acquire);
+    if (next) {
+        return dispatch_v2(next, false, call);
+    }
+    return invoke_native(slot->chain->trampoline, call,
+                         slot->chain->argument_count);
+}
+
 // Counted pass-through for a link that is entered but not running its detour.
 uintptr_t chain_gateway(uintptr_t a, uintptr_t b, uintptr_t c, uintptr_t d) {
     return continue_chain(current_entry->slot, a, b, c, d);
@@ -112,6 +211,16 @@ uintptr_t dispatch_anchor(NativeHookSlot* anchor, uintptr_t a, uintptr_t b, uint
         return dispatch(head, false, a, b, c, d);
     }
     return call_trampoline(anchor->chain, a, b, c, d);
+}
+
+uintptr_t dispatch_anchor_v2(NativeHookSlot* anchor,
+                             const NativeHookCall& call) {
+    auto* head = anchor->chain->head.load(std::memory_order_acquire);
+    if (head) {
+        return dispatch_v2(head, false, call);
+    }
+    return invoke_native(anchor->chain->trampoline, call,
+                         anchor->chain->argument_count);
 }
 
 uintptr_t dispatch(NativeHookSlot* slot, bool original, uintptr_t a, uintptr_t b, uintptr_t c,
@@ -140,6 +249,28 @@ uintptr_t dispatch(NativeHookSlot* slot, bool original, uintptr_t a, uintptr_t b
     return invoke_counted(slot, chain_gateway, a, b, c, d);
 }
 
+uintptr_t dispatch_v2(NativeHookSlot* slot, bool original,
+                      const NativeHookCall& call) {
+    if (slot->is_anchor) {
+        return dispatch_anchor_v2(slot, call);
+    }
+    const auto admitted =
+        slot->admission.fetch_add(kEntryUnit, std::memory_order_acq_rel);
+    const auto mode = static_cast<HookMode>(admitted & kModeMask);
+    if (mode == HookMode::Retired) {
+        const bool within_chain = is_chain_entered_on_current_thread(slot->chain);
+        leave(*slot);
+        if (original && !within_chain) {
+            return invoke_native(slot->target, call, slot->argument_count);
+        }
+        return continue_chain_v2(slot, call);
+    }
+    if (!original && mode == HookMode::Enabled) {
+        return invoke_counted_v2(slot, slot->detour, call);
+    }
+    return invoke_counted_chain_v2(slot, call);
+}
+
 } // namespace
 
 bool address_wait_available() {
@@ -153,6 +284,14 @@ uintptr_t detour_gateway(NativeHookSlot* slot, uintptr_t a, uintptr_t b, uintptr
 uintptr_t original_gateway(NativeHookSlot* slot, uintptr_t a, uintptr_t b, uintptr_t c,
                            uintptr_t d) {
     return dispatch(slot, true, a, b, c, d);
+}
+
+uintptr_t v2_detour_gateway(NativeHookCall* call, NativeHookSlot* slot) {
+    return dispatch_v2(slot, false, *call);
+}
+
+uintptr_t v2_original_gateway(NativeHookCall* call, NativeHookSlot* slot) {
+    return dispatch_v2(slot, true, *call);
 }
 
 bool is_entered_on_current_thread(const NativeHookSlot* slot) {

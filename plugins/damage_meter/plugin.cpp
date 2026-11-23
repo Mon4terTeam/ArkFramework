@@ -7,6 +7,7 @@
 #include <stdexcept>
 
 #include <ark/battle.h>
+#include <ark/crash_log.h>
 #include <ark/plugin.h>
 #include <imgui.h>
 
@@ -220,6 +221,8 @@ ARK_EXPORT const ArkPluginInfoV1* ark_plugin_query() {
 }
 
 ARK_EXPORT bool ark_plugin_initialize(const ArkPluginApiV1* host) {
+    ark::crash_log::install("damage_meter");
+    ark::crash_log::set_stage("damage_meter.initialize");
     return ark::damage_meter::initialize(host);
 }
 

@@ -68,8 +68,8 @@ struct ArkPluginApiV1 {
                                    size_t minimum_size);
     bool (*set_input_adapter)(void* owner, const ArkInputAdapterV1* adapter);
 
-    // Windows x64 only: at most four integer/pointer register arguments and an
-    // integer/pointer/void return; no by-value floating-point, vector or stack
+    // Windows x64 only: four integer/pointer register arguments and an
+    // integer/pointer/void return; no by-value floating-point or vector
     // arguments. Targets must be process-resident code, never an unloadable DLL.
     //
     // Hooks are created disabled. `original` is a core gate that stays valid
@@ -80,6 +80,13 @@ struct ArkPluginApiV1 {
     uint64_t (*create_native_hook)(void* owner, void* target, void* detour, void** original);
     bool (*enable_native_hook)(void* owner, uint64_t hook, bool enabled);
     bool (*remove_native_hook)(void* owner, uint64_t hook);
+    // v2 preserves 5..8 integer/pointer ABI arguments. argument_count is the
+    // total machine argument count, including any leading `this` or trailing
+    // MethodInfo* the target actually takes (for example, an instance IL2CPP
+    // method with four managed parameters and a MethodInfo* is 6). A v2 hook
+    // must not share a target with a v1 hook or with a different count.
+    uint64_t (*create_native_hook_v2)(void* owner, void* target, void* detour,
+                                      void** original, uint32_t argument_count);
 };
 
 struct ArkPluginInfoV1 {

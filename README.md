@@ -50,6 +50,11 @@ tests/                  单元测试、生命周期与原生钩子测试、测�
 third_party/            Dear ImGui 1.91.9b、MinHook 1.3.4、nlohmann/json
 cmake/                  CMake 的 Zig 工具链文件
 docs/plugin-sdk.md      插件开发文档
+docs/CustomSkillLoading.md  自定义技能加载、JSON Buff/ActionNode 与调试
+docs/CustomLevelAuthoring.md  自定义关卡、地块、装置与地图机制
+docs/LevelControl.md    关卡权重敌人、隐藏组、动作修改与追加敌人
+docs/MapRenderingResearch.md  自定义地图显示/合并网格问题研究
+docs/MapVisualOverrideProgress.md  地图美术覆盖最新进展与模型重建计划
 ```
 
 ## 构建
@@ -64,9 +69,20 @@ docs/plugin-sdk.md      插件开发文档
 .\package.ps1 -SkipBuild    # 复用 build-package\dist，仅重新组装发布目录
 ```
 
-发布包只包含 `damage_meter`、`BetterBattle`、`web_bridge` 三个插件；
+发布包包含 `damage_meter`、`BetterBattle`、`CustomSkills`、`web_bridge` 四个插件；
 `auto_login` 与 `BattleCheat` 明确排除。核心运行中时不要直接用
 `build-cmake` 重新链接核心，`package.ps1` 默认使用独立的 `build-package`。
+
+给已经持有上一版完整包的用户发修复时，不必重新发 43 MB：
+
+```powershell
+.\package.ps1 -PatchFrom ..\ArkFramework-previous\ArkFramework
+```
+
+`-PatchFrom` 指向上一版包含 `ArkFrameworkLoader.exe` 的目录。脚本会按 SHA256
+比较新旧包，只生成 `package\ArkFramework-patch-*.zip`，其中包含变更文件、
+删除列表和 `apply-patch.ps1`；接收方解压后执行
+`.\apply-patch.ps1 -Target <旧版 ArkFramework 目录>` 即可。
 
 也可直接使用 CMake 3.22+ 与 Ninja：
 

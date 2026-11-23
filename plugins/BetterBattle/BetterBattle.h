@@ -23,6 +23,7 @@
 
 #include "battle_event_capture.h"
 #include "class_ids.h"
+#include "damage_formula_capture.h"
 #include "../common/il2cpp_runtime.h"
 
 struct ArkExternalBridgeApiV1;
@@ -479,6 +480,17 @@ struct DamageSeries {
     std::array<std::vector<double>, kDamageTypeCount> types;
 };
 
+struct DamageTargetInfo {
+    std::string id;
+    std::uint32_t uid = 0;
+    double actual = 0;
+    double calculated = 0;
+    double healing = 0;
+    double regen = 0;
+    double taken = 0;
+    std::array<DamageTotals, kDamageTypeCount> types{};
+};
+
 struct DamageActorInfo {
     std::string id;
     std::string name;
@@ -503,6 +515,7 @@ struct DamageActorInfo {
     std::uint32_t hp_delta_fallbacks = 0;
     double elemental_buildup = 0;
     std::array<DamageTotals, kDamageTypeCount> types{};
+    std::unordered_map<std::string, DamageTargetInfo> targets;
     std::vector<double> curve;
     std::vector<double> healing_curve;
     std::vector<double> taken_curve;
@@ -533,6 +546,8 @@ struct DamageSnapshot {
     double total_taken = 0;
     double elemental_buildup = 0;
     std::array<DamageTotals, kDamageTypeCount> types{};
+    std::vector<DamageTargetInfo> target_totals;
+    DamageAttributionSnapshot attribution;
     DamageSeries series;
     std::size_t series_points = 0;
     std::vector<DamageActorInfo> actors;
@@ -563,6 +578,7 @@ struct DamageTracker {
     double total_taken = 0;
     double elemental_buildup = 0;
     std::array<DamageTotals, kDamageTypeCount> types{};
+    std::unordered_map<std::string, DamageTargetInfo> targets;
     DamageSeries series;
     std::unordered_map<std::string, DamageActorInfo> actors;
 };
@@ -730,6 +746,14 @@ struct TraceSkillMethods {
     void* remaining = nullptr;
     void* trigger_count = nullptr;
     void* begin_anim = nullptr;
+    void* progress_count = nullptr;
+    void* max_count = nullptr;
+    void* remaining_count = nullptr;
+    void* is_overloaded = nullptr;
+    void* remaining_overload = nullptr;
+    void* overload_ratio = nullptr;
+    void* available_count = nullptr;
+    void* should_change_charge_color = nullptr;
 };
 
 struct ProbeBuff {
@@ -981,6 +1005,10 @@ private:
     void load_catalog();
     void resolve_stage(const std::string& stage_id);
     void start_battle(const BattleStart& start);
+    void apply_level_control(void* level_data, const std::string& stage_id,
+                             const std::string& level_id);
+    void apply_runtime_level_control(void* controller);
+    void dump_level_control();
     void refresh_battle();
     void refresh_enemies(void* controller, BattleSnapshot& snapshot);
     void refresh_global_buffs(void* controller, BattleSnapshot& snapshot);
@@ -1228,6 +1256,7 @@ private:
     void cmd_enemy_outline_test(Args& args);
     void cmd_enemy_profile(Args& args);
     void cmd_enemy_waves(Args& args);
+    void cmd_level_control(Args& args);
     void cmd_tas_bench(Args& args);
     void cmd_refresh(Args& args);
     void cmd_interval(Args& args);
@@ -1235,6 +1264,7 @@ private:
     void cmd_asset(Args& args);
     void cmd_withdraw_signature(Args& args);
     void cmd_export_web(Args& args);
+    void cmd_damage_formula(Args& args);
 
     void publish_result(const std::string& result, bool ok = true);
     void publish_snapshot(BattleSnapshot snapshot);
@@ -1258,10 +1288,12 @@ private:
     il2cpp::Runtime runtime_;
     ClassIds classes_;
     BattleEventCapture battle_capture_;
+    DamageFormulaCapture damage_formula_capture_;
 
     mutable std::mutex mutex_;
     std::deque<Command> pending_;
     std::atomic<bool> work_running_{false};
+    std::atomic<std::uint64_t> work_started_tick_{0};
     std::atomic<bool> stopping_{false};
     bool pump_ready_ = false;
     bool catalog_requested_ = false;
@@ -1457,6 +1489,10 @@ private:
     std::vector<FocusedRendererState> focused_renderers_;
     std::vector<FocusedMaterialState> focused_materials_;
     bool enemy_wave_probe_pending_ = false;
+    bool level_control_runtime_applied_ = false;
+    void* level_control_applied_scheduler_ = nullptr;
+    std::vector<std::string> level_control_enabled_hidden_groups_;
+    std::vector<std::string> level_control_disabled_hidden_groups_;
     std::map<std::pair<void*, int>, std::vector<TalentInfo>> talent_cache_;
     std::map<std::pair<void*, std::uint32_t>, BuffStaticInfo> buff_static_cache_;
     std::uint64_t buff_cache_generation_ = 0;
@@ -1616,11 +1652,13 @@ private:
     void* trace_in_skill_method_ = nullptr;
     void* trace_state_id_method_ = nullptr;
     void* trace_alive_method_ = nullptr;
+    void* trace_mode_method_ = nullptr;
     InstanceFixedGetter trace_hp_get_ = nullptr;
     InstanceFixedGetter trace_sp_get_ = nullptr;
     InstanceBoolGetter trace_in_skill_get_ = nullptr;
     InstanceIntGetter trace_state_id_get_ = nullptr;
     InstanceBoolGetter trace_alive_get_ = nullptr;
+    InstanceIntGetter trace_mode_get_ = nullptr;
     InstanceBoolGetter trace_paused_get_ = nullptr;
     InstanceBoolGetter trace_playing_get_ = nullptr;
     InstanceIntGetter trace_state_get_ = nullptr;

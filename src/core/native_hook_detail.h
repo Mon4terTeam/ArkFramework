@@ -32,6 +32,12 @@ static_assert(sizeof(std::atomic<uint64_t>) == sizeof(uint64_t));
 
 using NativeFunction = uintptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 
+inline constexpr uint32_t kMaxNativeHookArguments = 8;
+
+struct NativeHookCall {
+    uintptr_t values[kMaxNativeHookArguments]{};
+};
+
 struct NativeHookSlot;
 
 // One per hooked target; process-resident once published.
@@ -39,6 +45,8 @@ struct NativeHookChain {
     std::atomic<NativeHookSlot*> head{nullptr};
     // Immutable, process-resident MinHook allocation.
     void* trampoline = nullptr;
+    uint32_t argument_count = 4;
+    bool v2 = false;
     // Number of enabled links. Protected by NativeHooks::mutex_, which also serializes the
     // MinHook patch operations.
     size_t enabled_links = 0;
@@ -63,6 +71,10 @@ struct NativeHookSlot {
     // Generated thunks that enter dispatch for this slot, as detour or as original.
     void* detour_gate = nullptr;
     void* original_gate = nullptr;
+    void* v2_detour_gate = nullptr;
+    void* v2_original_gate = nullptr;
+    uint32_t argument_count = 4;
+    bool v2 = false;
     bool removal_pending = false;
     bool removed = false;
 
@@ -102,6 +114,8 @@ bool address_wait_available();
 uintptr_t detour_gateway(NativeHookSlot* slot, uintptr_t a, uintptr_t b, uintptr_t c, uintptr_t d);
 uintptr_t original_gateway(NativeHookSlot* slot, uintptr_t a, uintptr_t b, uintptr_t c,
                            uintptr_t d);
+uintptr_t v2_detour_gateway(NativeHookCall* call, NativeHookSlot* slot);
+uintptr_t v2_original_gateway(NativeHookCall* call, NativeHookSlot* slot);
 
 // True when the calling thread is currently inside a counted entry of slot.
 bool is_entered_on_current_thread(const NativeHookSlot* slot);

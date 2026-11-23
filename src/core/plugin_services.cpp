@@ -105,6 +105,20 @@ bool PluginManager::with_external_service(const char* name, uint32_t abi, size_t
 
 uint64_t PluginManager::create_native_hook(void* owner, void* target, void* detour,
                                            void** original) {
+    return create_native_hook_impl(owner, target, detour, original, 4, false);
+}
+
+uint64_t PluginManager::create_native_hook_v2(void* owner, void* target,
+                                               void* detour, void** original,
+                                               uint32_t argument_count) {
+    return create_native_hook_impl(owner, target, detour, original,
+                                   argument_count, true);
+}
+
+uint64_t PluginManager::create_native_hook_impl(void* owner, void* target,
+                                                 void* detour, void** original,
+                                                 uint32_t argument_count,
+                                                 bool v2) {
     auto plugin = find_plugin(owner);
     if (!plugin) {
         return 0;
@@ -114,7 +128,10 @@ uint64_t PluginManager::create_native_hook(void* owner, void* target, void* deto
         return 0;
     }
     std::string error;
-    const uint64_t id = native_hooks_.create(owner, target, detour, original, error);
+    const uint64_t id =
+        v2 ? native_hooks_.create_v2(owner, target, detour, original,
+                                     argument_count, error)
+           : native_hooks_.create(owner, target, detour, original, error);
     const bool failed = !id && !error.empty();
     if (failed) {
         plugin->error = error;

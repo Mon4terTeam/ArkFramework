@@ -311,6 +311,7 @@ void LocalBattle::rogue_start(const BattleStart& start) {
             throw std::runtime_error("LevelUtils.LoadLevel 返回 null: " + final_level);
         }
         Root level_root(runtime_, level_data);
+        apply_level_control(level_data, start.path, final_level);
 
         void* query_class = classes_.char_query;
         void* inst_class = classes_.advanced_character_inst;
@@ -387,8 +388,9 @@ void LocalBattle::rogue_start(const BattleStart& start) {
             Root instance_root(runtime_, instance);
             runtime_.invoke(inst_ctor, instance,
                             {query_value, &level, &evolve, &potential, pair_list});
-            const int skill_index = std::clamp(slot.skill_index, 0, 2);
-            const int skill_level = std::clamp(slot.skill_level, 1, 10);
+            const int skill_index = std::clamp(slot.skill_index, -1, 2);
+            const int skill_level =
+                skill_index < 0 ? 1 : std::clamp(slot.skill_level, 1, 10);
             write_field_deep(runtime_, instance, inst_class, "skillIndex", skill_index);
             write_field_deep(runtime_, instance, inst_class, "mainSkillLvl", skill_level);
             if (!write_character_inst_trust(runtime_, instance, inst_class,

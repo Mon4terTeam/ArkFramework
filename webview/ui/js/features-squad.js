@@ -325,7 +325,10 @@
     const entry = rosterEntry(id);
     const caps = eliteCapsFor(id);
     const evolve = caps.length - 1;
-    const skill = clampInt((entry?.defaultSkill ?? 0) + 1, 1, 3, 1);
+    const count = skillCount(id);
+    const skill = count
+      ? clampInt((entry?.defaultSkill ?? 0) + 1, 1, count, 1)
+      : 0;
     return {
       id: String(id),
       level: caps[evolve],
@@ -334,7 +337,7 @@
       trust: 100,
       skill,
       skill_levels: [10, 10, 10],
-      skill_level: 10,
+      skill_level: count ? 10 : 1,
       module: "",
       module_level: 3,
     };
@@ -362,12 +365,13 @@
       const existing = existingById.get(id) || state.squad[index];
       const caps = eliteCapsFor(id);
       const evolve = clampInt(raw.evolve, 0, caps.length - 1, 0);
-      const skill = clampInt(raw.skill, 1, 3, 1);
+      const count = skillCount(id);
+      const skill = count ? clampInt(raw.skill, 1, count, 1) : 0;
       const skillLevels = normalizeSkillLevels(
         raw.skill_levels ?? existing?.skill_levels,
         raw.skill_level ?? existing?.skill_level ?? 10,
       );
-      if (raw.skill_level !== undefined) {
+      if (count && raw.skill_level !== undefined) {
         skillLevels[skill - 1] = clampInt(raw.skill_level, 1, 10, 10);
       }
       const rawModule = raw.module !== undefined
@@ -383,7 +387,7 @@
           : clampInt(existing?.trust, 0, 200, 100),
         skill,
         skill_levels: skillLevels,
-        skill_level: skillLevels[skill - 1],
+        skill_level: count ? skillLevels[skill - 1] : 1,
         module: moduleFor(rawModule)?.id || rawModule,
         module_level: raw.module_level !== undefined
           ? clampInt(raw.module_level, 1, 3, 3)
@@ -409,9 +413,10 @@
       const evolve = clampInt(slot.evolve, 0, caps.length - 1, 0);
       const level = clampInt(slot.level, 1, caps[evolve], caps[evolve]);
       const potential = clampInt(slot.potential, 0, 6, 0);
-      const skill = clampInt(slot.skill, 1, 3, 1);
+      const count = skillCount(slot.id);
+      const skill = count ? clampInt(slot.skill, 1, count, 1) : 0;
       const skillLevels = skillLevelsFor(slot);
-      const skillLevel = skillLevels[skill - 1];
+      const skillLevel = count ? skillLevels[skill - 1] : 1;
       slot.skill_level = skillLevel;
       const trust = clampInt(slot.trust, 0, 200, 100);
       const moduleId = String(
@@ -434,8 +439,10 @@
   }
 
   function skillCount(id) {
-    const localCount = rosterEntry(id)?.skills?.length;
-    if (localCount) return Math.max(1, Math.min(3, localCount));
+    const local = rosterEntry(id);
+    if (local) {
+      return Math.max(0, Math.min(3, local.skills?.length || 0));
+    }
     return Math.max(1, Math.min(3, Number(catalogEntry(id)?.skill_count) || 3));
   }
 
@@ -513,9 +520,12 @@
 
   function squadSkillRail(slot, index, locked) {
     const skills = rosterEntry(slot.id)?.skills || [];
-    const activeIndex = clampInt(slot.skill, 1, Math.max(1, skills.length), 1) - 1;
+    const count = skillCount(slot.id);
+    const activeIndex = count
+      ? clampInt(slot.skill, 1, count, 1) - 1
+      : -1;
     if (!skills.length) {
-      return Array.from({ length: skillCount(slot.id) }, (_, skillIndex) => {
+      return Array.from({ length: count }, (_, skillIndex) => {
         const number = skillIndex + 1;
         return `<button class="squad-skill-slot ${activeIndex === skillIndex ? "is-active" : ""}" ` +
           `data-action="squad-skill" data-index="${index}" data-skill="${number}" ` +
@@ -646,7 +656,8 @@
     }
     const entry = rosterEntry(slot.id);
     const skills = entry?.skills || [];
-    const skillIndex = clampInt(slot.skill, 1, Math.max(1, skills.length), 1) - 1;
+    const count = skillCount(slot.id);
+    const skillIndex = count ? clampInt(slot.skill, 1, count, 1) - 1 : -1;
     const skill = skills[skillIndex];
     const module = slot.module
       ? moduleListFor(slot.id).find((item) => item.id === slot.module)
@@ -663,7 +674,7 @@
       `E${evolve} Lv.${level} 潜 ${potential} 信赖 ${trust}%`,
       skill
         ? `技能 ${skillIndex + 1} · ${skill.name} · ${skillLevelLabel(levels[skillIndex])}`
-        : `技能 ${slot.skill}`,
+        : (count ? `技能 ${slot.skill}` : "无技能"),
       module ? `模组 ${module.type} · ${module.name}` : "不携带模组",
     ].join("    /    ");
     const skillButtons = skills.map((item, index) => {
@@ -690,10 +701,10 @@
         `<span class="squad-selection-skills">${skillButtons}</span></span>`
       : "";
     const tuners = `<span class="squad-selection-tuners">` +
-      `<label class="squad-selection-tuner">` +
-      `<span>技能等级</span>` +
-      `<select data-squad-tuner="skill-level" data-index="${state.selectedSquadIndex}" ` +
-      `aria-label="技能等级" ${locked ? "disabled" : ""}>${skillLevelOptions}</select></label>` +
+      (count ? `<label class="squad-selection-tuner">` +
+        `<span>技能等级</span>` +
+        `<select data-squad-tuner="skill-level" data-index="${state.selectedSquadIndex}" ` +
+        `aria-label="技能等级" ${locked ? "disabled" : ""}>${skillLevelOptions}</select></label>` : "") +
       `<label class="squad-selection-tuner ${module ? "" : "is-disabled"}">` +
       `<span>模组等级</span>` +
       `<select data-squad-tuner="module-level" data-index="${state.selectedSquadIndex}" ` +

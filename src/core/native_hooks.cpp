@@ -69,21 +69,35 @@ NativeHookSlot* NativeHooks::find(void* owner, uint64_t id, std::string& error) 
 }
 
 // Requires mutex_. Exceptions propagate to create().
-NativeHookChain* NativeHooks::find_or_create_chain(void* target, std::string& error) {
+NativeHookChain* NativeHooks::find_or_create_chain(void* target,
+                                                    uint32_t argument_count,
+                                                    bool v2,
+                                                    std::string& error) {
     if (const auto found = chains_.find(target); found != chains_.end()) {
+        if (found->second->v2 != v2 ||
+            found->second->argument_count != argument_count) {
+            error = "Native hook target already has an incompatible ABI";
+            return nullptr;
+        }
         return found->second;
     }
     auto chain = std::make_unique<NativeHookChain>();
+    chain->argument_count = argument_count;
+    chain->v2 = v2;
     auto* anchor = allocate_hook_slot(target, error);
     if (!anchor) {
         return nullptr;
     }
     anchor->chain = chain.get();
     anchor->is_anchor = true;
+    anchor->argument_count = argument_count;
+    anchor->v2 = v2;
     // All allocations precede publication to MinHook. The chain record, anchor and trampoline
     // then stay resident with the core.
     const auto position = chains_.emplace(target, chain.get()).first;
-    const auto status = MH_CreateHook(target, anchor->detour_gate, &chain->trampoline);
+    const auto status = MH_CreateHook(
+        target, v2 ? anchor->v2_detour_gate : anchor->detour_gate,
+        &chain->trampoline);
     if (status != MH_OK) {
         chains_.erase(position);
         error = minhook_error("MH_CreateHook", status);
@@ -94,12 +108,35 @@ NativeHookChain* NativeHooks::find_or_create_chain(void* target, std::string& er
 
 uint64_t NativeHooks::create(void* owner, void* target, void* detour, void** original,
                              std::string& error) {
+    return create_impl(owner, target, detour, original, 4, false, error);
+}
+
+uint64_t NativeHooks::create_v2(void* owner, void* target, void* detour,
+                                 void** original, uint32_t argument_count,
+                                 std::string& error) {
+    if (argument_count < 5 || argument_count > kMaxNativeHookArguments) {
+        if (original) {
+            *original = nullptr;
+        }
+        error = "Native hook v2 argument count must be in 5..8";
+        return 0;
+    }
+    return create_impl(owner, target, detour, original, argument_count, true, error);
+}
+
+uint64_t NativeHooks::create_impl(void* owner, void* target, void* detour,
+                                   void** original, uint32_t argument_count,
+                                   bool v2, std::string& error) {
     error.clear();
     if (original) {
         *original = nullptr;
     }
     if (!owner || !target || !detour || !original) {
         error = "Native hook creation requires owner, target, detour and original output";
+        return 0;
+    }
+    if (argument_count == 0 || argument_count > kMaxNativeHookArguments) {
+        error = "Native hook argument count must be in 1..8";
         return 0;
     }
     if (!address_wait_available()) {
@@ -112,11 +149,13 @@ uint64_t NativeHooks::create(void* owner, void* target, void* detour, void** ori
             return 0;
         }
         std::lock_guard lock(mutex_);
-        auto* chain = find_or_create_chain(target, error);
+        auto* chain = find_or_create_chain(target, argument_count, v2, error);
         if (!chain) {
             return 0;
         }
         slot->chain = chain;
+        slot->argument_count = argument_count;
+        slot->v2 = v2;
         hooks_.emplace(slot->id, OwnedHook{owner, slot});
         slot->owner = owner;
         slot->detour = detour;
@@ -124,7 +163,7 @@ uint64_t NativeHooks::create(void* owner, void* target, void* detour, void** ori
         slot->next.store(chain->head.load(std::memory_order_relaxed), std::memory_order_relaxed);
         slot->set_mode(HookMode::Disabled);
         chain->head.store(slot, std::memory_order_release);
-        *original = slot->original_gate;
+        *original = v2 ? slot->v2_original_gate : slot->original_gate;
         return slot->id;
     } catch (const std::exception& exception) {
         // Unpublished slots are consumed, never reused by another owner.

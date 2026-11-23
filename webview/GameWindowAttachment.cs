@@ -11,8 +11,6 @@ namespace BetterBattleWeb;
 
 internal sealed class GameWindowAttachment : IDisposable
 {
-    private const string GamePath =
-        @"E:\Games\ArkTest\Arknights\Arknights.exe";
     private static readonly string RestoreStatePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "BetterBattleWeb", "gameview-restore.json");
@@ -101,6 +99,7 @@ internal sealed class GameWindowAttachment : IDisposable
     private bool _disposed;
     private bool _dashboardMinimized;
     private Rectangle _appliedFrame;
+    private string _lastDiscoveryKey = "";
     private double _cssX;
     private double _cssY;
     private double _cssWidth;
@@ -286,12 +285,18 @@ internal sealed class GameWindowAttachment : IDisposable
                 var hwnd = FindGameWindow((uint)process.Id);
                 if (hwnd == IntPtr.Zero || !IsWindow(hwnd))
                 {
+                    _log($"gameview window not found pid={process.Id} " +
+                         $"path={ProcessPath(process)}");
                     SetState(
                         GameWindowState.Unavailable,
                         "游戏进程已找到，等待主窗口…");
                     _watch.Start();
                     return;
                 }
+                _log($"gameview target pid={process.Id} " +
+                     $"hwnd=0x{hwnd.ToInt64():X} " +
+                     $"class={WindowClass(hwnd)} title={WindowTitle(hwnd)} " +
+                     $"path={ProcessPath(process)}");
                 _game = hwnd;
                 _capture = LoadOrCapture(hwnd, process.Id);
             }
@@ -317,11 +322,20 @@ internal sealed class GameWindowAttachment : IDisposable
 
         if (GetWindow(_game, GW_OWNER) != _dashboard.Handle)
         {
+            Marshal.SetLastPInvokeError(0);
             SetWindowLongPtrW(_game, GWLP_HWNDPARENT, _dashboard.Handle);
         }
         if (GetWindow(_game, GW_OWNER) != _dashboard.Handle)
         {
-            SetState(GameWindowState.Error, "无法把游戏窗口设为仪表盘 owner");
+            var error = Marshal.GetLastWin32Error();
+            var hint = error == 5
+                ? "（游戏与 WebView 权限不同，请以相同权限启动）"
+                : "";
+            _log($"gameview owner failed hwnd=0x{_game.ToInt64():X} " +
+                 $"dashboard=0x{_dashboard.Handle.ToInt64():X} " +
+                 $"win32={error}{hint}");
+            SetState(GameWindowState.Error,
+                $"无法把游戏窗口设为仪表盘 owner（Win32 {error}）{hint}");
             return;
         }
 
@@ -668,14 +682,22 @@ internal sealed class GameWindowAttachment : IDisposable
             var targetWidth = clientWidth + borderWidth;
             var targetHeight = clientHeight + borderHeight;
 
-            SetWindowPos(
+            Marshal.SetLastPInvokeError(0);
+            if (!SetWindowPos(
                 _game,
                 IntPtr.Zero,
                 targetX,
                 targetY,
                 targetWidth,
                 targetHeight,
-                SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+                SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW))
+            {
+                var error = Marshal.GetLastWin32Error();
+                _log($"gameview layout failed win32={error} " +
+                     $"target={clientWidth}x{clientHeight} " +
+                     $"at {targetX},{targetY}");
+                return false;
+            }
             GetWindowRect(_game, out var finalFrame);
             GetClientRect(_game, out var finalClient);
             _appliedFrame = finalFrame.ToRectangle();
@@ -790,6 +812,10 @@ internal sealed class GameWindowAttachment : IDisposable
 
     private void SetState(GameWindowState state, string message)
     {
+        if (_state != state || _message != message)
+        {
+            _log($"gameview state {StateName(state)}: {message}");
+        }
         _state = state;
         _message = message;
         PostState();
@@ -832,16 +858,31 @@ internal sealed class GameWindowAttachment : IDisposable
             try
             {
                 process.Refresh();
-                var path = process.MainModule?.FileName;
-                if (string.IsNullOrWhiteSpace(path) ||
-                    !path.Equals(GamePath, StringComparison.OrdinalIgnoreCase))
+                var hwnd = FindGameWindow((uint)process.Id);
+                if (hwnd == IntPtr.Zero || !IsWindow(hwnd))
                 {
+                    LogDiscovery($"no-window:{process.Id}",
+                        $"gameview discovery pid={process.Id} " +
+                        $"path={ProcessPath(process)} has no candidate window");
+                    process.Dispose();
                     continue;
                 }
-                var hwnd = FindGameWindow((uint)process.Id);
-                if (hwnd == IntPtr.Zero || !IsWindow(hwnd)) continue;
-                if (!GetWindowRect(hwnd, out var rect)) continue;
+                if (!GetWindowRect(hwnd, out var rect))
+                {
+                    LogDiscovery($"no-rect:{process.Id}:{hwnd.ToInt64()}",
+                        $"gameview discovery pid={process.Id} " +
+                        $"hwnd=0x{hwnd.ToInt64():X} GetWindowRect failed " +
+                        $"win32={Marshal.GetLastWin32Error()}");
+                    process.Dispose();
+                    continue;
+                }
                 var area = (long)rect.Width * rect.Height;
+                LogDiscovery($"candidate:{process.Id}:{hwnd.ToInt64()}",
+                    $"gameview discovery pid={process.Id} " +
+                    $"hwnd=0x{hwnd.ToInt64():X} " +
+                    $"class={WindowClass(hwnd)} title={WindowTitle(hwnd)} " +
+                    $"size={rect.Width}x{rect.Height} " +
+                    $"path={ProcessPath(process)}");
                 if (area > bestArea)
                 {
                     best?.Dispose();
@@ -852,9 +893,16 @@ internal sealed class GameWindowAttachment : IDisposable
             }
             catch (Exception error)
             {
-                _log("gameview process skipped: " + error.Message);
+                LogDiscovery($"process-error:{process.Id}",
+                    $"gameview discovery pid={process.Id} skipped: " +
+                    error.Message);
             }
             process.Dispose();
+        }
+        if (best is null)
+        {
+            LogDiscovery("none",
+                "gameview discovery: Arknights process not found");
         }
         return best;
     }
@@ -862,11 +910,9 @@ internal sealed class GameWindowAttachment : IDisposable
     private static IntPtr FindGameWindow(uint pid)
     {
         var best = IntPtr.Zero;
-        long bestArea = 0;
-        var fallback = IntPtr.Zero;
-        long fallbackArea = 0;
+        long bestScore = long.MinValue;
         var hidden = IntPtr.Zero;
-        long hiddenArea = 0;
+        long hiddenScore = long.MinValue;
         EnumWindows((hwnd, _) =>
         {
             GetWindowThreadProcessId(hwnd, out var windowPid);
@@ -875,47 +921,75 @@ internal sealed class GameWindowAttachment : IDisposable
             var className = new System.Text.StringBuilder(128);
             GetWindowTextW(hwnd, title, title.Capacity);
             GetClassNameW(hwnd, className, className.Capacity);
-            if (!string.Equals(className.ToString(), "UnityWndClass",
-                    StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(title.ToString(), "明日方舟",
-                    StringComparison.OrdinalIgnoreCase))
+            var titleText = title.ToString();
+            var classNameText = className.ToString();
+            var unity = string.Equals(classNameText, "UnityWndClass",
+                StringComparison.OrdinalIgnoreCase);
+            var titleMatch = titleText.Equals("明日方舟",
+                StringComparison.OrdinalIgnoreCase) ||
+                titleText.Contains("Arknights", StringComparison.OrdinalIgnoreCase);
+            if (!unity && !titleMatch && titleText.Length == 0)
             {
                 return true;
             }
             if (!GetWindowRect(hwnd, out var rect)) return true;
+            if (rect.Width < 100 || rect.Height < 100) return true;
             var area = (long)rect.Width * rect.Height;
+            var score = area;
+            if (unity) score += 1_000_000_000_000L;
+            if (titleMatch) score += 100_000_000_000L;
+            if (IsIconic(hwnd)) score += 10_000_000L;
             if (!IsWindowVisible(hwnd))
             {
-                if (rect.Width >= 640 && rect.Height >= 480 &&
-                    area > hiddenArea)
+                score -= 1_000_000_000_000L;
+                if (score > hiddenScore)
                 {
                     hidden = hwnd;
-                    hiddenArea = area;
+                    hiddenScore = score;
                 }
                 return true;
             }
-            if (IsIconic(hwnd) ||
-                (rect.Width >= 640 && rect.Height >= 480))
+            if (score > bestScore)
             {
-                if (area > bestArea)
-                {
-                    best = hwnd;
-                    bestArea = area;
-                }
-            }
-            else if (rect.Width >= 100 && rect.Height >= 100)
-            {
-                if (area > fallbackArea)
-                {
-                    fallback = hwnd;
-                    fallbackArea = area;
-                }
+                best = hwnd;
+                bestScore = score;
             }
             return true;
         }, IntPtr.Zero);
-        return best != IntPtr.Zero ? best
-            : fallback != IntPtr.Zero ? fallback
-            : hidden;
+        return best != IntPtr.Zero ? best : hidden;
+    }
+
+    private void LogDiscovery(string key, string message)
+    {
+        if (key == _lastDiscoveryKey) return;
+        _lastDiscoveryKey = key;
+        _log(message);
+    }
+
+    private static string WindowTitle(IntPtr hwnd)
+    {
+        var title = new System.Text.StringBuilder(256);
+        GetWindowTextW(hwnd, title, title.Capacity);
+        return title.ToString();
+    }
+
+    private static string WindowClass(IntPtr hwnd)
+    {
+        var name = new System.Text.StringBuilder(256);
+        GetClassNameW(hwnd, name, name.Capacity);
+        return name.ToString();
+    }
+
+    private static string ProcessPath(Process process)
+    {
+        try
+        {
+            return process.MainModule?.FileName ?? "";
+        }
+        catch
+        {
+            return "";
+        }
     }
 
     private static Rectangle FrameForStyle(IntPtr hwnd, long style)
@@ -1113,7 +1187,7 @@ internal sealed class GameWindowAttachment : IDisposable
     [DllImport("user32.dll")]
     private static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
 
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowPos(
         IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y,
         int cx, int cy, uint flags);

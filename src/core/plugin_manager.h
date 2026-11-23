@@ -188,6 +188,9 @@ private:
     static bool api_set_input_adapter(void* owner, const ArkInputAdapterV1* adapter);
     static uint64_t api_create_native_hook(void* owner, void* target, void* detour,
                                            void** original);
+    static uint64_t api_create_native_hook_v2(void* owner, void* target,
+                                               void* detour, void** original,
+                                               uint32_t argument_count);
     static bool api_enable_native_hook(void* owner, uint64_t id, bool enabled);
     static bool api_remove_native_hook(void* owner, uint64_t id);
 
@@ -198,6 +201,11 @@ private:
 
     // Native hooks.
     uint64_t create_native_hook(void* owner, void* target, void* detour, void** original);
+    uint64_t create_native_hook_v2(void* owner, void* target, void* detour,
+                                   void** original, uint32_t argument_count);
+    uint64_t create_native_hook_impl(void* owner, void* target, void* detour,
+                                     void** original, uint32_t argument_count,
+                                     bool v2);
     bool enable_native_hook(void* owner, uint64_t id, bool enabled);
     bool remove_native_hook(void* owner, uint64_t id);
 

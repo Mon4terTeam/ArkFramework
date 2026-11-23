@@ -1,6 +1,15 @@
 #include "battle_helpers.h"
 
+#include <ark/crash_log.h>
+
 namespace ark::better_battle {
+namespace {
+
+std::string damage_target_key(const std::string& id, std::uint32_t uid) {
+    return id + '\x1f' + std::to_string(uid);
+}
+
+} // namespace
 
 void LocalBattle::publish_result(const std::string& result, bool ok) {
     {
@@ -129,6 +138,18 @@ void LocalBattle::poll_battle_events() {
                     receiver.hp_locked = true;
                 }
                 receiver.regen += regen;
+                DamageTargetInfo& target_info =
+                    receiver.targets[damage_target_key(event.target_id,
+                                                        event.target_uid)];
+                target_info.id = event.target_id;
+                target_info.uid = event.target_uid;
+                target_info.regen += regen;
+                DamageTargetInfo& global_target =
+                    damage_tracker_.targets[damage_target_key(
+                        event.target_id, event.target_uid)];
+                global_target.id = event.target_id;
+                global_target.uid = event.target_uid;
+                global_target.regen += regen;
                 damage_tracker_.total_regen += regen;
                 ++damage_tracker_.event_count;
                 {
@@ -160,6 +181,14 @@ void LocalBattle::poll_battle_events() {
             if (actor_id.empty()) {
                 continue;
             }
+            if ((event.kind == ArkBattleEventKind::Damage ||
+                 event.kind == ArkBattleEventKind::Healing) &&
+                !event.target_id.empty()) {
+                damage_formula_capture_.observe_damage_event(
+                    event.frame, actor_id, event.target_id, actor_uid,
+                    event.target_uid, event.damage_type,
+                    std::abs(event.calculated_delta));
+            }
 
             DamageActorInfo& actor = damage_tracker_.actors[actor_id];
             actor.id = actor_id;
@@ -183,6 +212,18 @@ void LocalBattle::poll_battle_events() {
                 DamageActorInfo& healer = damage_tracker_.actors[actor_id];
                 healer.id = actor_id;
                 healer.healing += healing;
+                DamageTargetInfo& heal_target =
+                    healer.targets[damage_target_key(event.target_id,
+                                                      event.target_uid)];
+                heal_target.id = event.target_id;
+                heal_target.uid = event.target_uid;
+                heal_target.healing += healing;
+                DamageTargetInfo& global_heal_target =
+                    damage_tracker_.targets[damage_target_key(
+                        event.target_id, event.target_uid)];
+                global_heal_target.id = event.target_id;
+                global_heal_target.uid = event.target_uid;
+                global_heal_target.healing += healing;
                 DamageActorInfo& receiver = damage_tracker_.actors[event.target_id];
                 receiver.id = event.target_id;
                 if (!receiver.hp_locked) {
@@ -244,6 +285,18 @@ void LocalBattle::poll_battle_events() {
                         receiver.hp_locked = true;
                     }
                     receiver.taken += taken;
+                    DamageTargetInfo& source_target =
+                        receiver.targets[damage_target_key(actor_id,
+                                                            actor_uid)];
+                    source_target.id = actor_id;
+                    source_target.uid = actor_uid;
+                    source_target.taken += taken;
+                    DamageTargetInfo& global_taken_target =
+                        damage_tracker_.targets[damage_target_key(
+                            event.target_id, event.target_uid)];
+                    global_taken_target.id = event.target_id;
+                    global_taken_target.uid = event.target_uid;
+                    global_taken_target.taken += taken;
                     if (std::isfinite(event.hp_delta)) {
                         receiver.hp_event_delta += event.hp_delta;
                         ++receiver.hp_delta_events;
@@ -280,6 +333,27 @@ void LocalBattle::poll_battle_events() {
             actor.calculated += calculated;
             actor.types[static_cast<std::size_t>(type)].actual += actual;
             actor.types[static_cast<std::size_t>(type)].calculated += calculated;
+            DamageTargetInfo& target_info =
+                actor.targets[damage_target_key(event.target_id,
+                                                event.target_uid)];
+            target_info.id = event.target_id;
+            target_info.uid = event.target_uid;
+            target_info.actual += actual;
+            target_info.calculated += calculated;
+            target_info.types[static_cast<std::size_t>(type)].actual += actual;
+            target_info.types[static_cast<std::size_t>(type)].calculated +=
+                calculated;
+            DamageTargetInfo& global_target =
+                damage_tracker_.targets[damage_target_key(event.target_id,
+                                                          event.target_uid)];
+            global_target.id = event.target_id;
+            global_target.uid = event.target_uid;
+            global_target.actual += actual;
+            global_target.calculated += calculated;
+            global_target.types[static_cast<std::size_t>(type)].actual +=
+                actual;
+            global_target.types[static_cast<std::size_t>(type)].calculated +=
+                calculated;
             damage_tracker_.total_actual += actual;
             damage_tracker_.total_calculated += calculated;
             damage_tracker_.types[static_cast<std::size_t>(type)].actual += actual;
@@ -375,6 +449,19 @@ DamageSnapshot LocalBattle::damage_snapshot(bool include_curves) const {
     snapshot.total_taken = damage_tracker_.total_taken;
     snapshot.elemental_buildup = damage_tracker_.elemental_buildup;
     snapshot.types = damage_tracker_.types;
+    snapshot.target_totals.reserve(damage_tracker_.targets.size());
+    for (const auto& [key, target] : damage_tracker_.targets) {
+        (void)key;
+        DamageTargetInfo info = target;
+        info.id = target.id;
+        snapshot.target_totals.push_back(std::move(info));
+    }
+    std::sort(snapshot.target_totals.begin(), snapshot.target_totals.end(),
+              [](const DamageTargetInfo& left,
+                 const DamageTargetInfo& right) {
+                  return left.actual + left.taken > right.actual + right.taken;
+              });
+    snapshot.attribution = damage_formula_capture_.snapshot();
     snapshot.actors.reserve(damage_tracker_.actors.size());
     for (const auto& [id, actor] : damage_tracker_.actors) {
         DamageActorInfo info;
@@ -400,6 +487,7 @@ DamageSnapshot LocalBattle::damage_snapshot(bool include_curves) const {
         info.hp_delta_fallbacks = actor.hp_delta_fallbacks;
         info.elemental_buildup = actor.elemental_buildup;
         info.types = actor.types;
+        info.targets = actor.targets;
         info.curve_points = actor.curve.size();
         if (include_curves) {
             info.curve = actor.curve;
@@ -602,6 +690,7 @@ void LocalBattle::resolve_stage(const std::string& stage_id) {
 }
 
 void LocalBattle::start_battle(const BattleStart& start) {
+    ark::crash_log::set_stage("bb.start_battle");
     if (start.stage.empty()) {
         publish_result("关卡 ID 为空", false);
         return;
@@ -611,6 +700,7 @@ void LocalBattle::start_battle(const BattleStart& start) {
         return;
     }
     try {
+        ark::crash_log::set_stage("bb.start_battle.resolve_stage");
         remember_previous_controller_for_restart();
         void* stage_util = classes_.stage_data_util;
         void* stage_class = classes_.stage_data;
@@ -650,7 +740,9 @@ void LocalBattle::start_battle(const BattleStart& start) {
             throw std::runtime_error("LevelUtils.LoadLevel 返回 null");
         }
         Root level_root(runtime_, level_data);
+        apply_level_control(level_data, start.stage, level_id);
 
+        ark::crash_log::set_stage("bb.start_battle.roster");
         void* query_class = classes_.char_query;
         void* inst_class = classes_.advanced_character_inst;
         void* simple_char = runtime_.method(query_class, "SimpleChar", 1);
@@ -722,8 +814,9 @@ void LocalBattle::start_battle(const BattleStart& start) {
             Root instance_root(runtime_, instance);
             runtime_.invoke(inst_ctor, instance,
                             {query_value, &level, &evolve, &potential, pair_list});
-            const int skill_index = std::clamp(slot.skill_index, 0, 2);
-            const int skill_level = std::clamp(slot.skill_level, 1, 10);
+            const int skill_index = std::clamp(slot.skill_index, -1, 2);
+            const int skill_level =
+                skill_index < 0 ? 1 : std::clamp(slot.skill_level, 1, 10);
             write_field_deep(runtime_, instance, inst_class, "skillIndex", skill_index);
             write_field_deep(runtime_, instance, inst_class, "mainSkillLvl", skill_level);
             if (!write_character_inst_trust(runtime_, instance, inst_class,
@@ -868,6 +961,7 @@ void LocalBattle::start_battle(const BattleStart& start) {
         Root scene_root(runtime_, scene_text);
         void* start_scene = runtime_.method(flow_class, "StartScene", 2);
         void* options_value = runtime_.object_unbox(options);
+        ark::crash_log::set_stage("bb.start_battle.start_scene");
         void* started = runtime_.invoke(start_scene, flow, {scene_text, options_value});
         const bool accepted = started && runtime_.unbox<bool>(started);
         if (!accepted) {
@@ -887,7 +981,11 @@ void LocalBattle::start_battle(const BattleStart& start) {
         publish_result("已提交本地战斗：" + start.stage + "，干员 " +
                        std::to_string(start.squad.size()) + " 名，battleId=" + battle_id);
     } catch (const std::exception& error) {
+        ark::crash_log::writef("start_battle failed: %s", error.what());
         publish_result(std::string("启动战斗失败：") + error.what(), false);
+    } catch (...) {
+        ark::crash_log::write("start_battle failed: unknown exception");
+        publish_result("启动战斗失败：未知异常", false);
     }
 }
 

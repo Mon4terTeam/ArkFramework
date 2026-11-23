@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Custom Skill Inspector</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">CS</div>
+      <div>
+        <h1>Custom Skill Inspector</h1>
+        <p>SkillData → prefab → Ability → Buff → ActionNode</p>
+      </div>
+    </div>
+    <nav class="tabs" id="tabs">
+      <button class="tab is-active" data-tab="browse">浏览</button>
+      <button class="tab" data-tab="talent">天赋</button>
+      <button class="tab" data-tab="buff">Buff 图</button>
+      <button class="tab" data-tab="component">组件详情</button>
+      <button class="tab" data-tab="coverage">覆盖率</button>
+      <button class="tab" data-tab="runtime">运行时分类</button>
+    </nav>
+    <div class="top-stats" id="topStats">
+      <span class="stat-chip" id="statOperators">--</span>
+      <span class="stat-chip" id="statSkills">--</span>
+      <span class="stat-chip" id="statNodes">--</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="page is-active" id="page-browse">
+      <div class="browse-layout">
+        <aside class="panel rail">
+          <div class="panel-head">
+            <h2>干员 / Token</h2>
+            <span class="muted" id="operatorCount">--</span>
+          </div>
+          <div class="rail-tools">
+            <input id="searchInput" type="search" placeholder="搜索名称、ID、称号" autocomplete="off">
+            <div class="segmented" id="kindFilter">
+              <button class="is-active" data-kind="all">全部</button>
+              <button data-kind="operator">干员</button>
+              <button data-kind="token">Token</button>
+            </div>
+          </div>
+          <div class="operator-list" id="operatorList">
+            <div class="empty">加载中…</div>
+          </div>
+        </aside>
+
+        <section class="center" id="center">
+          <div class="empty-panel panel">
+            <h2>选择一个干员</h2>
+            <p>左侧列表来自解析器的 compact operator 索引。</p>
+          </div>
+        </section>
+
+      </div>
+    </section>
+
+    <section class="page" id="page-talent">
+      <div class="wide-page">
+        <div class="page-head">
+          <div>
+            <h2 id="talentTitle">天赋</h2>
+            <p id="talentSubtitle" class="muted">从干员页进入，或在左侧选择一个干员。</p>
+          </div>
+          <button class="btn" id="talentBack">返回浏览</button>
+        </div>
+        <div id="talentDetail">
+          <div class="empty-panel panel"><h3>未选择干员</h3></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="page" id="page-component">
+      <div class="wide-page">
+        <div class="page-head">
+          <div>
+            <h2 id="componentTitle">组件详情</h2>
+            <p id="componentSubtitle" class="muted">从浏览页点击组件卡片打开。</p>
+          </div>
+          <button class="btn" id="componentBack">返回浏览</button>
+        </div>
+        <div class="component-breadcrumb" id="componentBreadcrumb"></div>
+        <div id="componentDetail">
+          <div class="empty-panel panel"><h3>未选择组件</h3></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="page" id="page-buff">
+      <div class="wide-page">
+        <div class="page-head">
+          <div>
+            <h2>Buff 图</h2>
+            <p>按 Buff key 直接查看事件、条件和 ActionNode 蓝图。</p>
+          </div>
+        </div>
+        <article class="panel buff-search-panel">
+          <div class="buff-search">
+            <input id="buffInput" type="search" placeholder="输入 Buff key，如 c2e_cold" autocomplete="off">
+            <button class="btn" id="buffLoad">查看</button>
+          </div>
+          <div class="field-chips" id="buffExamples">
+            <button class="field-chip" data-buff="c2e_cold">c2e_cold</button>
+            <button class="field-chip" data-buff="c2e_freeze[double_cold]">c2e_freeze[double_cold]</button>
+            <button class="field-chip" data-buff="stun">stun</button>
+            <button class="field-chip" data-buff="silence">silence</button>
+          </div>
+        </article>
+        <div id="buffResult">
+          <div class="empty-panel panel"><h3>输入一个 Buff key</h3></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="page" id="page-coverage">
+      <div class="wide-page">
+        <div class="page-head">
+          <div>
+            <h2>覆盖率</h2>
+            <p>静态解析结果。区分“已解析”“静态缺口”“运行时状态”。</p>
+          </div>
+          <span class="badge" id="coverageStamp">--</span>
+        </div>
+        <div class="metric-grid" id="coverageMetrics"></div>
+        <div class="two-col">
+          <article class="panel">
+            <div class="panel-head"><h3>未解析引用</h3><span class="muted" id="unresolvedCount">--</span></div>
+            <div id="unresolvedList"></div>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><h3>未完全覆盖</h3><span class="muted">核心 prefab 缺口</span></div>
+            <div id="failedOperators"></div>
+          </article>
+        </div>
+        <article class="panel">
+          <div class="panel-head"><h3>组件类型分布</h3><span class="muted">从干员图可达的 prefab</span></div>
+          <div id="componentKinds" class="bar-list"></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="page" id="page-runtime">
+      <div class="wide-page">
+        <div class="page-head">
+          <div>
+            <h2>运行时分类</h2>
+            <p>静态展开、运行时状态和真正 runtime-only 的部分分开看。</p>
+          </div>
+        </div>
+        <div id="runtimeCards" class="runtime-grid"></div>
+        <article class="panel">
+          <div class="panel-head"><h3>判断规则</h3><span class="muted">直观优先</span></div>
+          <div class="rules">
+            <div><b>静态展开</b><span>Selector、Validator、组件引用和 Ability 名称先尽量在 prefab 内解析。</span></div>
+            <div><b>运行时状态</b><span>结构已知，但当前 mode、附着、目标、黑板、生命周期需要实机。</span></div>
+            <div><b>真正 runtime-only</b><span>loadFromDB Buff、动态实体、原生 Ability 行为、Lua 桥。</span></div>
+          </div>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="modeDialog" class="mode-dialog">
+    <div class="mode-dialog-head">
+      <div>
+        <div class="eyebrow">CHARACTER MODE</div>
+        <h2 id="modeTitle">Modes</h2>
+        <p id="modeSubtitle" class="muted"></p>
+      </div>
+      <button class="btn" id="modeClose">关闭</button>
+    </div>
+    <div class="mode-dialog-body" id="modeBody"></div>
+  </dialog>
+
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -290,6 +290,7 @@ void PluginManager::build_api(Plugin& plugin) {
     api.require_service = &PluginManager::api_require_service;
     api.set_input_adapter = &PluginManager::api_set_input_adapter;
     api.create_native_hook = &PluginManager::api_create_native_hook;
+    api.create_native_hook_v2 = &PluginManager::api_create_native_hook_v2;
     api.enable_native_hook = &PluginManager::api_enable_native_hook;
     api.remove_native_hook = &PluginManager::api_remove_native_hook;
 }
@@ -344,6 +345,13 @@ bool PluginManager::api_set_input_adapter(void* owner, const ArkInputAdapterV1* 
 uint64_t PluginManager::api_create_native_hook(void* owner, void* target, void* detour,
                                                void** original) {
     return manager_instance()->create_native_hook(owner, target, detour, original);
+}
+
+uint64_t PluginManager::api_create_native_hook_v2(
+    void* owner, void* target, void* detour, void** original,
+    uint32_t argument_count) {
+    return manager_instance()->create_native_hook_v2(
+        owner, target, detour, original, argument_count);
 }
 
 bool PluginManager::api_enable_native_hook(void* owner, uint64_t id, bool enabled) {

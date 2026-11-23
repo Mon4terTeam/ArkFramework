@@ -1,4 +1,5 @@
 #include <ark/external_bridge.h>
+#include <ark/crash_log.h>
 #include <ark/plugin.h>
 
 #include <windows.h>
@@ -45,7 +46,15 @@ public:
 
     static DWORD WINAPI thread_entry(LPVOID parameter) {
         auto* start = static_cast<ThreadStart*>(parameter);
-        start->server->loop(start->generation);
+        ark::crash_log::set_stage("web_bridge.worker");
+        try {
+            start->server->loop(start->generation);
+        } catch (const std::exception& error) {
+            ark::crash_log::writef(
+                "web_bridge worker fatal: %s", error.what());
+        } catch (...) {
+            ark::crash_log::write("web_bridge worker fatal: unknown exception");
+        }
         delete start;
         return 0;
     }
@@ -246,7 +255,17 @@ private:
                     } catch (...) {
                         frame["payload"] = payload;
                     }
-                    const std::string frame_text = frame.dump();
+                    ark::crash_log::set_stage("web_bridge.frame_dump");
+                    std::string frame_text;
+                    try {
+                        frame_text = frame.dump();
+                    } catch (const std::exception& error) {
+                        ark::crash_log::writef(
+                            "web_bridge dump failed: %s", error.what());
+                        frame["payload"] = "<invalid UTF-8 payload>";
+                        frame_text = frame.dump();
+                    }
+                    ark::crash_log::set_stage("web_bridge.write_frame");
                     if (!write_frame(pipe, frame_text)) {
                         write_ok = false;
                         break;
@@ -331,6 +350,8 @@ ARK_EXPORT const ArkPluginInfoV1* ark_plugin_query() {
 }
 
 ARK_EXPORT bool ark_plugin_initialize(const ArkPluginApiV1* host) {
+    ark::crash_log::install("web_bridge");
+    ark::crash_log::set_stage("web_bridge.initialize");
     if (!ark::web_bridge::host_is_compatible(host)) {
         return false;
     }

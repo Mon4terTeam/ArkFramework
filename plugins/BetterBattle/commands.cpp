@@ -179,7 +179,7 @@ std::vector<SquadSlot> parse_roster(const std::string& roster) {
             slot.evolve = std::clamp(slot.evolve, 0, 2);
             slot.potential = std::clamp(slot.potential, 0, 6);
             slot.trust = std::clamp(slot.trust, 0, 200);
-            slot.skill_index = std::clamp(slot.skill_index, 0, 2);
+            slot.skill_index = std::clamp(slot.skill_index, -1, 2);
             slot.skill_level = std::clamp(slot.skill_level, 1, 10);
             slot.module_level = std::clamp(slot.module_level, 1, 3);
             squad.push_back(std::move(slot));
@@ -297,6 +297,7 @@ void LocalBattle::run_command(const Command& command) {
     {"enemy-outline-test", &LocalBattle::cmd_enemy_outline_test},
     {"enemy-profile", &LocalBattle::cmd_enemy_profile},
     {"enemy-waves", &LocalBattle::cmd_enemy_waves},
+    {"level-control", &LocalBattle::cmd_level_control},
     {"tas-bench", &LocalBattle::cmd_tas_bench},
     {"refresh", &LocalBattle::cmd_refresh},
     {"interval", &LocalBattle::cmd_interval},
@@ -304,6 +305,7 @@ void LocalBattle::run_command(const Command& command) {
     {"asset", &LocalBattle::cmd_asset},
     {"withdraw-signature", &LocalBattle::cmd_withdraw_signature},
     {"export-web", &LocalBattle::cmd_export_web},
+    {"damage-formula", &LocalBattle::cmd_damage_formula},
 };
     for (const CommandSpec& spec : kCommands) {
         if (spec.name != command.name) {
@@ -1015,6 +1017,82 @@ void LocalBattle::cmd_withdraw_signature(Args&) {
 
 void LocalBattle::cmd_export_web(Args& args) {
     export_web(args.rest());
+}
+
+void LocalBattle::cmd_damage_formula(Args& args) {
+    const std::string action = args.next();
+    if (action == "start") {
+        const std::string name = args.next();
+        const std::string file =
+            name.empty() ? "battle_damage_formula.jsonl" : name;
+        const std::filesystem::path path =
+            std::filesystem::path(host_.root_directory) / file;
+        if (!damage_formula_capture_.start(path.string())) {
+            throw std::runtime_error("伤害公式采集文件无法写入");
+        }
+        publish_result("伤害公式采集已开始：" + path.string());
+        return;
+    }
+    if (action == "stop") {
+        damage_formula_capture_.stop();
+        publish_result("伤害公式采集已停止，记录=" +
+                       std::to_string(damage_formula_capture_.records()));
+        return;
+    }
+    if (action == "status") {
+        const DamageAttributionSnapshot attribution =
+            damage_formula_capture_.snapshot();
+        double no_source_base = 0;
+        for (const DamageAttributionTotal& total :
+             attribution.no_source_totals) {
+            no_source_base += total.shapley;
+        }
+        publish_result(std::string("伤害公式采集=") +
+                       (damage_formula_capture_.active() ? "运行中" : "未运行") +
+                       "，记录=" +
+                       std::to_string(damage_formula_capture_.records()) +
+                       "，回调=" + std::to_string(damage_formula_capture_.calls()) +
+                       "，事件=" + std::to_string(attribution.observed_events) +
+                       "，精确配对=" + std::to_string(attribution.hits) +
+                       "，未匹配=" +
+                       std::to_string(attribution.unmatched_events) +
+                       "，未归因=" +
+                       std::to_string(attribution.unallocated) +
+                       "，入口 damage=" +
+                       std::to_string(attribution.entries.calculate_damage) +
+                       "/noevent=" +
+                       std::to_string(
+                           attribution.entries.calculate_damage_no_event) +
+                       "/internal=" +
+                       std::to_string(
+                           attribution.entries.calculate_damage_internal) +
+                       "/value=" +
+                       std::to_string(
+                           attribution.entries.calculate_damage_value) +
+                       "/element=" +
+                       std::to_string(
+                           attribution.entries.element_source_target) + "/" +
+                       std::to_string(attribution.entries.element_target) +
+                       "/" +
+                       std::to_string(
+                           attribution.entries.element_value_only) +
+                       "/heal=" +
+                       std::to_string(
+                           attribution.entries.heal_source_target) +
+                       "/" +
+                       std::to_string(attribution.entries.heal_target) +
+                       "，类型 p=" +
+                       std::to_string(attribution.physical_events) + "/m=" +
+                       std::to_string(attribution.magical_events) + "/t=" +
+                       std::to_string(attribution.true_events) + "/h=" +
+                       std::to_string(attribution.healing_events) + "/e=" +
+                       std::to_string(attribution.elemental_events) +
+                       "/nosrc=" +
+                       std::to_string(attribution.no_source_events) +
+                       "/nosrc_base=" + std::to_string(no_source_base));
+        return;
+    }
+    throw std::runtime_error("damage-formula 需要 start [文件]、stop 或 status");
 }
 
 } // namespace ark::better_battle

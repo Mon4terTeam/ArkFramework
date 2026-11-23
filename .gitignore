@@ -25,6 +25,10 @@ __pycache__/
 /NUL
 /recordings/
 
+# Generated custom parser reports
+/custom/out/*
+!/custom/out/.gitignore
+
 # Local-only plugins and their notes
 /plugins/auto_login/
 /plugins/battle_cheat/

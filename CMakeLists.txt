@@ -46,6 +46,8 @@ file(GLOB ARK_LOADER_SOURCES CONFIGURE_DEPENDS src/loader/*.cpp)
 file(GLOB ARK_BOOTSTRAP_SOURCES CONFIGURE_DEPENDS src/bootstrap/*.c)
 file(GLOB ARK_DAMAGE_METER_SOURCES CONFIGURE_DEPENDS plugins/damage_meter/*.cpp plugins/common/*.cpp)
 file(GLOB ARK_BETTER_BATTLE_SOURCES CONFIGURE_DEPENDS plugins/BetterBattle/*.cpp plugins/common/*.cpp)
+file(GLOB ARK_CUSTOM_RUNTIME_SOURCES CONFIGURE_DEPENDS custom/runtime/*.cpp)
+file(GLOB ARK_CUSTOM_PLUGIN_SOURCES CONFIGURE_DEPENDS custom/plugin/*.cpp)
 file(GLOB ARK_WEB_BRIDGE_SOURCES CONFIGURE_DEPENDS plugins/web_bridge/*.cpp)
 file(GLOB ARK_TEST_HOST_SOURCES CONFIGURE_DEPENDS tests/host/*.cpp)
 
@@ -120,6 +122,17 @@ add_library(web_bridge SHARED ${ARK_WEB_BRIDGE_SOURCES})
 target_link_libraries(web_bridge PRIVATE ark_headers ArkImGui user32)
 ark_output_directory("${ARK_DIST_DIRECTORY}/plugins" web_bridge)
 
+add_library(CustomSkills SHARED
+  ${ARK_CUSTOM_RUNTIME_SOURCES}
+  ${ARK_CUSTOM_PLUGIN_SOURCES}
+  plugins/common/il2cpp_runtime.cpp)
+target_link_libraries(CustomSkills PRIVATE ark_headers user32)
+ark_output_directory("${ARK_DIST_DIRECTORY}/plugins" CustomSkills)
+add_custom_command(TARGET CustomSkills POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "${CMAKE_CURRENT_SOURCE_DIR}/custom/runtime/custom_complex_arc.json"
+          "${ARK_DIST_DIRECTORY}/custom_complex_arc.json")
+
 find_program(DOTNET_EXECUTABLE dotnet)
 if(DOTNET_EXECUTABLE)
   set(ARK_BETTER_BATTLE_WEB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/webview")
@@ -146,6 +159,12 @@ if(BUILD_TESTING)
 
   add_executable(damage_meter_tests tests/damage_meter_tests.cpp)
   target_link_libraries(damage_meter_tests PRIVATE ark_headers)
+
+  add_executable(damage_calculator_tests tests/damage_calculator_tests.cpp
+    plugins/BetterBattle/damage_calculator.cpp
+    plugins/BetterBattle/damage_attribution.cpp)
+  target_include_directories(damage_calculator_tests
+    PRIVATE plugins/BetterBattle)
 
   add_executable(lifecycle_tests tests/lifecycle_tests.cpp
     $<TARGET_OBJECTS:ark_plugin_runtime> $<TARGET_OBJECTS:ark_native_hooks>)
@@ -177,11 +196,13 @@ if(BUILD_TESTING)
   foreach(fixture_target IN LISTS ark_fixtures)
     target_link_libraries(${fixture_target} PRIVATE ark_test_headers)
   endforeach()
-  ark_output_directory("${ARK_TEST_DIRECTORY}" damage_meter_tests lifecycle_tests native_hook_tests
+  ark_output_directory("${ARK_TEST_DIRECTORY}" damage_meter_tests
+    damage_calculator_tests lifecycle_tests native_hook_tests
     ${ark_fixtures})
   ark_wide_entry_point(damage_meter_tests lifecycle_tests native_hook_tests)
 
   add_test(NAME damage_meter_model COMMAND damage_meter_tests)
+  add_test(NAME damage_calculator COMMAND damage_calculator_tests)
   add_test(NAME plugin_lifecycle COMMAND lifecycle_tests "${ARK_TEST_DIRECTORY}")
   add_test(NAME native_hook_lifetime COMMAND native_hook_tests "${ARK_TEST_DIRECTORY}")
   add_test(NAME graphical_plugin_lifecycle COMMAND ArkFrameworkHost --self-test)

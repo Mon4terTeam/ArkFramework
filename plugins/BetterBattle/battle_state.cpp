@@ -1,8 +1,11 @@
 #include "battle_helpers.h"
 
+#include <ark/crash_log.h>
+
 namespace ark::better_battle {
 
 void LocalBattle::refresh_battle() {
+    ark::crash_log::set_stage("bb.refresh_battle");
     const std::uint64_t refresh_started = perf_now_us();
     BattleSnapshot next;
     std::vector<TraceUnit> new_trace_units;
@@ -35,6 +38,9 @@ void LocalBattle::refresh_battle() {
             }
             adopt_scene(controllers.front());
             controller = scene_.controller;
+        }
+        if (controller) {
+            apply_runtime_level_control(controller);
         }
         if (card_scene_revision_ != scene_.revision) {
             card_scene_revision_ = scene_.revision;
@@ -377,6 +383,14 @@ void LocalBattle::refresh_battle() {
                                               perf_.buff_misses, info.buffs,
                                               &info.shield_layers);
                             perf_.buffs.add(perf_now_us() - buffs_started);
+                            if (damage_formula_capture_.active()) {
+                                std::vector<AttributeContribution>
+                                    contributions;
+                                collect_attribute_contributions(
+                                    info.buffs, contributions);
+                                damage_formula_capture_.update_entity(
+                                    object, info.id, info.uid, contributions);
+                            }
                         } catch (...) {
                         }
                         try {
@@ -417,6 +431,7 @@ void LocalBattle::refresh_battle() {
                                                  unit.minus_hp);
             }
         }
+        damage_formula_capture_.set_frame(next.frame);
         poll_battle_events();
         update_unit_health_ledger(next.units, next.frame);
         if (damage_tracker_.started) {
@@ -441,6 +456,11 @@ void LocalBattle::refresh_battle() {
     } catch (const std::exception& error) {
         next.available = false;
         next.error = error.what();
+        ark::crash_log::writef("refresh_battle failed: %s", error.what());
+    } catch (...) {
+        next.available = false;
+        next.error = "refresh unknown exception";
+        ark::crash_log::write("refresh_battle failed: unknown exception");
     }
     note_timeline_frame(next.frame);
     publish_web_snapshot(next);
@@ -600,7 +620,7 @@ void LocalBattle::deploy(std::uint32_t uid, int row, int col, int direction) {
         }
         Root tile_root(runtime_, tile);
 
-        int direction = std::clamp(direction, 0, 3);
+        direction = std::clamp(direction, 0, 3);
         bool strict = false;
         bool manually = true;
         bool freely = true;
@@ -830,10 +850,26 @@ void LocalBattle::inspect_skill(std::uint32_t uid) {
         if (controllers.empty()) {
             throw std::runtime_error("当前不在战斗场景");
         }
-        void* character =
-            find_character(runtime_, controllers.front(), controller_class, uid);
+        void* character = nullptr;
+        for (void* controller : controllers) {
+            character =
+                find_entity_uid(runtime_, controller, controller_class, uid);
+            if (character) {
+                break;
+            }
+        }
         if (!character) {
-            throw std::runtime_error("找不到 UID " + std::to_string(uid) + " 的干员");
+            for (void* controller : controllers) {
+                character =
+                    find_character(runtime_, controller, controller_class, uid);
+                if (character) {
+                    break;
+                }
+            }
+        }
+        if (!character) {
+            throw std::runtime_error("找不到 UID " + std::to_string(uid) +
+                                     " 的实体");
         }
         Root character_root(runtime_, character);
         void* character_class = classes_.character;
@@ -1009,6 +1045,12 @@ void LocalBattle::inspect_buff_fields(std::uint32_t uid) {
         output << "character=" << method_string(runtime_, character, entity_class, "get_id")
                << " cardUid=" << uid << '\n';
         output << "\n[BuffContainer]\n" << describe_class_layout(runtime_, container_class, true);
+        void* buff_class = runtime_.find("Torappu.Battle", "Buff");
+        output << "\n[Buff]\n"
+               << describe_class_layout(runtime_, buff_class, true);
+        void* modifier_class = runtime_.find("Torappu.Battle", "Modifier");
+        output << "\n[Modifier]\n"
+               << describe_class_layout(runtime_, modifier_class, true);
         for (const char* field_name : {"m_buffs", "m_buffUidMap", "m_buffOverrideMap"}) {
             void* field_object = nullptr;
             if (!read_field_deep(runtime_, container, container_class, field_name,
@@ -1043,10 +1085,26 @@ void LocalBattle::dump_buffs(std::uint32_t uid) {
         if (controllers.empty()) {
             throw std::runtime_error("当前不在战斗场景");
         }
-        void* character =
-            find_character(runtime_, controllers.front(), controller_class, uid);
+        void* character = nullptr;
+        for (void* controller : controllers) {
+            character =
+                find_entity_uid(runtime_, controller, controller_class, uid);
+            if (character) {
+                break;
+            }
+        }
         if (!character) {
-            throw std::runtime_error("找不到 UID " + std::to_string(uid) + " 的干员");
+            for (void* controller : controllers) {
+                character =
+                    find_character(runtime_, controller, controller_class, uid);
+                if (character) {
+                    break;
+                }
+            }
+        }
+        if (!character) {
+            throw std::runtime_error("找不到 UID " + std::to_string(uid) +
+                                     " 的实体");
         }
         Root character_root(runtime_, character);
         void* entity_class = classes_.entity;

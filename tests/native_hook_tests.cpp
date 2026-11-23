@@ -776,6 +776,265 @@ void test_relocated_call(NativeHooks& hooks, const std::filesystem::path& direct
               "outside counted gates");
 }
 
+using NativeCall6 = uintptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t,
+                                  uintptr_t, uintptr_t);
+using NativeCall5 = uintptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t,
+                                  uintptr_t);
+using NativeCall8 = uintptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t,
+                                  uintptr_t, uintptr_t, uintptr_t, uintptr_t);
+
+std::atomic<uintptr_t> v2_seen_e{0};
+std::atomic<uintptr_t> v2_seen_f{0};
+NativeCall6 v2_original = nullptr;
+NativeCall5 v2_original5 = nullptr;
+NativeCall8 v2_original8 = nullptr;
+std::atomic<uintptr_t> v2_seen5_e{0};
+std::array<std::atomic<uintptr_t>, 4> v2_seen8_stack{};
+std::atomic<uintptr_t> v2_chain_seen_a{0};
+std::atomic<uintptr_t> v2_chain_seen_b{0};
+NativeCall5 v2_chain_original_a = nullptr;
+NativeCall5 v2_chain_original_b = nullptr;
+
+__declspec(noinline) uintptr_t v2_target(uintptr_t a, uintptr_t b, uintptr_t c,
+                                         uintptr_t d, uintptr_t e, uintptr_t f) {
+    return a * 3 + b * 5 + c * 7 + d * 11 + e * 13 + f * 17;
+}
+
+__declspec(noinline) uintptr_t v2_target5(uintptr_t a, uintptr_t b,
+                                          uintptr_t c, uintptr_t d,
+                                          uintptr_t e) {
+    return a * 3 + b * 5 + c * 7 + d * 11 + e * 13;
+}
+
+__declspec(noinline) uintptr_t v2_target8(uintptr_t a, uintptr_t b,
+                                          uintptr_t c, uintptr_t d,
+                                          uintptr_t e, uintptr_t f,
+                                          uintptr_t g, uintptr_t h) {
+    return a * 3 + b * 5 + c * 7 + d * 11 + e * 13 + f * 17 + g * 19 +
+           h * 23;
+}
+
+// Never hooked before the mixed-ABI test, because a target's chain record is
+// permanent once created.
+__declspec(noinline) uintptr_t v2_target_mixed(uintptr_t a, uintptr_t b,
+                                               uintptr_t c, uintptr_t d,
+                                               uintptr_t e) {
+    return a * 3 + b * 5 + c * 7 + d * 11 + e * 13;
+}
+
+uintptr_t v2_detour(uintptr_t a, uintptr_t b, uintptr_t c, uintptr_t d,
+                    uintptr_t e, uintptr_t f) {
+    v2_seen_e.store(e, std::memory_order_release);
+    v2_seen_f.store(f, std::memory_order_release);
+    return v2_original(a, b, c, d, e, f) + kGenerationStep;
+}
+
+uintptr_t v2_detour5(uintptr_t a, uintptr_t b, uintptr_t c, uintptr_t d,
+                     uintptr_t e) {
+    v2_seen5_e.store(e, std::memory_order_release);
+    return v2_original5(a, b, c, d, e) + kGenerationStep;
+}
+
+uintptr_t v2_detour8(uintptr_t a, uintptr_t b, uintptr_t c, uintptr_t d,
+                     uintptr_t e, uintptr_t f, uintptr_t g, uintptr_t h) {
+    const std::array<uintptr_t, 4> stack = {e, f, g, h};
+    for (size_t i = 0; i != stack.size(); ++i) {
+        v2_seen8_stack[i].store(stack[i], std::memory_order_release);
+    }
+    return v2_original8(a, b, c, d, e, f, g, h) + kGenerationStep;
+}
+
+uintptr_t v2_chain_detour_a(uintptr_t a, uintptr_t b, uintptr_t c,
+                            uintptr_t d, uintptr_t e) {
+    v2_chain_seen_a.store(e, std::memory_order_release);
+    return v2_chain_original_a(a, b, c, d, e) + kGenerationStep;
+}
+
+uintptr_t v2_chain_detour_b(uintptr_t a, uintptr_t b, uintptr_t c,
+                            uintptr_t d, uintptr_t e) {
+    v2_chain_seen_b.store(e, std::memory_order_release);
+    return v2_chain_original_b(a, b, c, d, e) + kGenerationStep;
+}
+
+void test_v2_five_arguments(NativeHooks& hooks) {
+    std::string error;
+    void* original = nullptr;
+    const uint64_t id = hooks.create_v2(
+        &hooks, reinterpret_cast<void*>(&v2_target5),
+        reinterpret_cast<void*>(&v2_detour5), &original, 5, error);
+    ARK_CHECK_HOOK(id, error);
+    ARK_CHECK(original);
+    v2_original5 = reinterpret_cast<NativeCall5>(original);
+
+    constexpr uintptr_t a = UINT64_C(0x0102030405060708);
+    constexpr uintptr_t b = UINT64_C(0x1112131415161718);
+    constexpr uintptr_t c = UINT64_C(0x2122232425262728);
+    constexpr uintptr_t d = UINT64_C(0x3132333435363738);
+    constexpr uintptr_t e = UINT64_C(0x4142434445464748);
+    const uintptr_t expected_value = a * 3 + b * 5 + c * 7 + d * 11 + e * 13;
+
+    // The original gate is callable before the hook is enabled and must already
+    // preserve the fifth, stack-passed argument.
+    ARK_CHECK(v2_original5(a, b, c, d, e) == expected_value);
+    ARK_CHECK_HOOK(hooks.enable(&hooks, id, true, error), error);
+    NativeCall5 target = reinterpret_cast<NativeCall5>(&v2_target5);
+    ARK_CHECK(target(a, b, c, d, e) == expected_value + kGenerationStep);
+    ARK_CHECK(v2_seen5_e.load(std::memory_order_acquire) == e);
+    ARK_CHECK(v2_original5(a, b, c, d, e) == expected_value);
+    ARK_CHECK_HOOK(hooks.remove(&hooks, id, kWaitMs, error), error);
+    ARK_CHECK(v2_target5(a, b, c, d, e) == expected_value);
+    v2_original5 = nullptr;
+    std::puts("PASS v2 preserves a fifth stack argument and exact original results");
+}
+
+void test_v2_eight_arguments(NativeHooks& hooks) {
+    std::string error;
+    void* original = nullptr;
+    const uint64_t id = hooks.create_v2(
+        &hooks, reinterpret_cast<void*>(&v2_target8),
+        reinterpret_cast<void*>(&v2_detour8), &original, 8, error);
+    ARK_CHECK_HOOK(id, error);
+    ARK_CHECK(original);
+    v2_original8 = reinterpret_cast<NativeCall8>(original);
+
+    constexpr uintptr_t a = UINT64_C(0x0101010101010101);
+    constexpr uintptr_t b = UINT64_C(0x0202020202020202);
+    constexpr uintptr_t c = UINT64_C(0x0303030303030303);
+    constexpr uintptr_t d = UINT64_C(0x0404040404040404);
+    constexpr uintptr_t e = UINT64_C(0x0505050505050505);
+    constexpr uintptr_t f = UINT64_C(0x0606060606060606);
+    constexpr uintptr_t g = UINT64_C(0x0707070707070707);
+    constexpr uintptr_t h = UINT64_C(0x0808080808080808);
+    const uintptr_t expected_value =
+        a * 3 + b * 5 + c * 7 + d * 11 + e * 13 + f * 17 + g * 19 + h * 23;
+
+    ARK_CHECK(v2_original8(a, b, c, d, e, f, g, h) == expected_value);
+    ARK_CHECK_HOOK(hooks.enable(&hooks, id, true, error), error);
+    NativeCall8 target = reinterpret_cast<NativeCall8>(&v2_target8);
+    ARK_CHECK(target(a, b, c, d, e, f, g, h) ==
+              expected_value + kGenerationStep);
+    const std::array<uintptr_t, 4> expected_stack = {e, f, g, h};
+    for (size_t i = 0; i != expected_stack.size(); ++i) {
+        ARK_CHECK(v2_seen8_stack[i].load(std::memory_order_acquire) ==
+                  expected_stack[i]);
+    }
+    ARK_CHECK(v2_original8(a, b, c, d, e, f, g, h) == expected_value);
+    ARK_CHECK_HOOK(hooks.remove(&hooks, id, kWaitMs, error), error);
+    ARK_CHECK(v2_target8(a, b, c, d, e, f, g, h) == expected_value);
+    v2_original8 = nullptr;
+    std::puts("PASS v2 preserves eight native arguments and exact original results");
+}
+
+void test_v2_shared_target(NativeHooks& hooks) {
+    std::string error;
+    void* original_a = nullptr;
+    void* original_b = nullptr;
+    const uint64_t id_a = hooks.create_v2(
+        &hooks, reinterpret_cast<void*>(&v2_target5),
+        reinterpret_cast<void*>(&v2_chain_detour_a), &original_a, 5, error);
+    ARK_CHECK_HOOK(id_a, error);
+    const uint64_t id_b = hooks.create_v2(
+        &hooks, reinterpret_cast<void*>(&v2_target5),
+        reinterpret_cast<void*>(&v2_chain_detour_b), &original_b, 5, error);
+    ARK_CHECK_HOOK(id_b, error);
+    v2_chain_original_a = reinterpret_cast<NativeCall5>(original_a);
+    v2_chain_original_b = reinterpret_cast<NativeCall5>(original_b);
+    ARK_CHECK_HOOK(hooks.enable(&hooks, id_a, true, error), error);
+    ARK_CHECK_HOOK(hooks.enable(&hooks, id_b, true, error), error);
+
+    constexpr uintptr_t a = 3;
+    constexpr uintptr_t b = 5;
+    constexpr uintptr_t c = 7;
+    constexpr uintptr_t d = 11;
+    constexpr uintptr_t e = UINT64_C(0x7070707070707070);
+    const uintptr_t base = a * 3 + b * 5 + c * 7 + d * 11 + e * 13;
+    NativeCall5 target = reinterpret_cast<NativeCall5>(&v2_target5);
+    ARK_CHECK(target(a, b, c, d, e) == base + 2 * kGenerationStep);
+    ARK_CHECK(v2_chain_seen_a.load(std::memory_order_acquire) == e);
+    ARK_CHECK(v2_chain_seen_b.load(std::memory_order_acquire) == e);
+    ARK_CHECK(v2_chain_original_a(a, b, c, d, e) == base);
+    // B's original continues below B, which still includes A's live link.
+    ARK_CHECK(v2_chain_original_b(a, b, c, d, e) == base + kGenerationStep);
+
+    // Removing the newest link must leave the older v2 link live.
+    ARK_CHECK_HOOK(hooks.remove(&hooks, id_b, kWaitMs, error), error);
+    ARK_CHECK(target(a, b, c, d, e) == base + kGenerationStep);
+    ARK_CHECK_HOOK(hooks.remove(&hooks, id_a, kWaitMs, error), error);
+    ARK_CHECK(v2_target5(a, b, c, d, e) == base);
+    v2_chain_original_a = nullptr;
+    v2_chain_original_b = nullptr;
+    std::puts("PASS shared v2 target chains preserve stack arguments and ordered originals");
+}
+
+void test_v2_rejects_invalid_abi(NativeHooks& hooks) {
+    std::string error;
+    void* original = reinterpret_cast<void*>(1);
+    ARK_CHECK(!hooks.create_v2(&hooks, reinterpret_cast<void*>(&v2_target5),
+                               reinterpret_cast<void*>(&v2_detour5), &original,
+                               4, error));
+    ARK_CHECK(original == nullptr);
+    ARK_CHECK(!error.empty());
+
+    original = reinterpret_cast<void*>(1);
+    ARK_CHECK(!hooks.create_v2(&hooks, reinterpret_cast<void*>(&v2_target5),
+                               reinterpret_cast<void*>(&v2_detour5), &original,
+                               9, error));
+    ARK_CHECK(original == nullptr);
+    ARK_CHECK(!error.empty());
+
+    // A target cannot change ABI between links. The v1 chain must survive the
+    // rejected v2 request and still be removable.
+    void* v1_original = nullptr;
+    const uint64_t v1 = hooks.create(&hooks,
+                                     reinterpret_cast<void*>(&v2_target_mixed),
+                                     reinterpret_cast<void*>(&v2_detour5),
+                                     &v1_original, error);
+    ARK_CHECK_HOOK(v1, error);
+    ARK_CHECK(v1_original);
+    void* v2_original = nullptr;
+    ARK_CHECK(!hooks.create_v2(&hooks,
+                               reinterpret_cast<void*>(&v2_target_mixed),
+                               reinterpret_cast<void*>(&v2_detour5),
+                               &v2_original, 5, error));
+    ARK_CHECK(v2_original == nullptr);
+    ARK_CHECK(error.find("incompatible ABI") != std::string::npos);
+    ARK_CHECK_HOOK(hooks.remove(&hooks, v1, kWaitMs, error), error);
+    ARK_CHECK(v2_target_mixed(1, 2, 3, 4, 5) == 3 + 10 + 21 + 44 + 65);
+    std::puts("PASS v2 rejects mismatched argument counts and mixed ABI chains");
+}
+
+void test_v2_stack_arguments(NativeHooks& hooks) {
+    std::string error;
+    void* original = nullptr;
+    const uint64_t id = hooks.create_v2(
+        &hooks, reinterpret_cast<void*>(&v2_target),
+        reinterpret_cast<void*>(&v2_detour), &original, 6, error);
+    ARK_CHECK_HOOK(id, error);
+    ARK_CHECK(original);
+    v2_original = reinterpret_cast<NativeCall6>(original);
+    ARK_CHECK_HOOK(hooks.enable(&hooks, id, true, error), error);
+    ARK_CHECK(reinterpret_cast<unsigned char*>(&v2_target)[0] == 0xe9);
+
+    constexpr uintptr_t a = UINT64_C(0x1111222233334444);
+    constexpr uintptr_t b = UINT64_C(0x5555666677778888);
+    constexpr uintptr_t c = UINT64_C(0x9999aaaabbbbcccc);
+    constexpr uintptr_t d = UINT64_C(0xddddeeeeffff0001);
+    constexpr uintptr_t e = UINT64_C(0x123456789abcdef0);
+    constexpr uintptr_t f = UINT64_C(0x0fedcba987654321);
+    const uintptr_t expected_v2 =
+        a * 3 + b * 5 + c * 7 + d * 11 + e * 13 + f * 17;
+    NativeCall6 target = reinterpret_cast<NativeCall6>(&v2_target);
+    const uintptr_t hooked = target(a, b, c, d, e, f);
+    ARK_CHECK(v2_seen_e.load(std::memory_order_acquire) == e);
+    ARK_CHECK(v2_seen_f.load(std::memory_order_acquire) == f);
+    ARK_CHECK(hooked == expected_v2 + kGenerationStep);
+    ARK_CHECK(v2_original(a, b, c, d, e, f) == expected_v2);
+    ARK_CHECK_HOOK(hooks.remove(&hooks, id, kWaitMs, error), error);
+    ARK_CHECK(v2_target(a, b, c, d, e, f) == expected_v2);
+    v2_original = nullptr;
+    std::puts("PASS v2 preserves six native arguments and exact original results");
+}
+
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
@@ -792,6 +1051,11 @@ int wmain(int argc, wchar_t** argv) {
 
     NativeHooks hooks;
     test_forwarding(hooks, directory);
+    test_v2_five_arguments(hooks);
+    test_v2_stack_arguments(hooks);
+    test_v2_eight_arguments(hooks);
+    test_v2_shared_target(hooks);
+    test_v2_rejects_invalid_abi(hooks);
     test_shared_target(hooks, directory);
     test_blocked_timeout(hooks, directory);
     test_callback_removal(hooks, directory);

@@ -86,9 +86,12 @@ ARK_EXPORT bool ark_plugin_shutdown() {
 
 ## 原生调用钩子
 
-`create_native_hook / enable_native_hook / remove_native_hook` 允许多个插件安全地共享同一原生目标。
+`create_native_hook / create_native_hook_v2 / enable_native_hook / remove_native_hook`
+允许多个插件安全地共享同一原生目标。
 
-- 仅支持 Windows x64：最多四个整数/指针寄存器参数，返回整数/指针/void；不支持按值浮点/向量参数或栈参数。目标必须是进程常驻代码，不能位于可卸载的 DLL 中。
+- 仅支持 Windows x64 的整数/指针参数，返回整数/指针/void；不支持按值浮点/向量参数。目标必须是进程常驻代码，不能位于可卸载的 DLL 中。
+- `create_native_hook` 保持原语义，可传 1–4 个寄存器参数。`create_native_hook_v2` 额外搬运栈参数，支持 5–8 个原生参数；`argument_count` 是实际机器参数总数，包含实例方法的 `this` 和 IL2CPP 方法末尾的 `MethodInfo*`（如果该目标确实接收）。例如静态方法 `Foo(Entity, Entity, Boolean, Boolean, AttackInfo&)` 在本客户端实测为 5 个原生参数。
+- 同一目标的所有链节必须使用相同的 ABI 和参数数；混用 v1/v2 或不同 `argument_count` 会被拒绝，且不影响已有链。
 - 钩子创建时处于禁用状态，返回 ID 与 `original` 网关；只有所属插件能操作该 ID。启用的回调按创建时间从新到旧执行，`original` 继续调用其下方的链，原生目标只执行一次。
 - 禁用只跳过本插件的链节；最后一个启用的链节停用时恢复原入口。禁用不等待在途调用。
 - 移除会等待已进入的调用结束；超时、在回调中移除自身或跨回调循环等待时返回 `false`，状态保留以便重试。移除成功前必须保留回调状态与 DLL；成功后不得再调用已交还的 `original`。

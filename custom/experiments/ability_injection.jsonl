@@ -1,0 +1,7 @@
+{"id":"emitter_json_svash2","target":"char_1045_svash2","source":"none","kind":"behaviour","component":"Torappu.Battle.Abilities.SimpleProjectileEmitter","anchor":"attack","result":"projectile_chr_chen3_s3","status":"verified"}
+{"id":"ranged_json_svash2","target":"char_1045_svash2","source":"none","kind":"ability","component":"Torappu.Battle.Abilities.RangedAttack","anchor":"entity","cast":true,"result":"projectile_enemy_plkght","status":"verified"}
+{"id":"emitter_wrapper_mcnist","target":"char_4230_mcnist","source":"none","kind":"behaviour","component":"Torappu.Battle.Abilities.SimpleProjectileEmitter","anchor":"attack","result":"projectile_chr_chen3_s3","status":"verified"}
+{"id":"passive_clone_svash2","target":"char_1045_svash2","source":"char_1050_chen3","kind":"ability","component":"Torappu.Battle.Abilities.PassiveBuffAbility","result":"chen3_t1,common_weak_damage","status":"verified"}
+{"id":"ranged_clone_chen","target":"char_1050_chen3","source":"enemy_1101_plkght_2","kind":"ability","component":"Torappu.Battle.Abilities.RangedAttack","cast":true,"result":"projectile_enemy_plkght","status":"verified"}
+{"id":"aura_clone_chen","target":"char_1050_chen3","source":"char_1045_svash2","kind":"ability","component":"Torappu.Battle.Abilities.GlobalAuraAbility","result":"attached_only","status":"conditional"}
+{"id":"complex_skill_mcnist","target":"char_4230_mcnist","source":"custom_complex_arc.json","kind":"skill-runtime","component":"CastSkillWithLimitTimes","result":"ammo=16,host_buff,phase_buffs","status":"verified"}

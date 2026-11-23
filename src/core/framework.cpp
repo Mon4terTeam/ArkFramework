@@ -10,6 +10,7 @@
 #include <stdexcept>
 
 #include <MinHook.h>
+#include <ark/crash_log.h>
 #include <ark/plugin.h>
 
 #include "overlay.h"
@@ -107,11 +108,15 @@ void handle_core_failure(CoreState* state, const std::exception& error) {
 DWORD WINAPI core_worker(void*) {
     // Intentionally never deleted: exported functions may still read it.
     CoreState* state = nullptr;
+    ark::crash_log::set_stage("core_worker");
     try {
         state = new CoreState;
         run_core(*state);
     } catch (const std::exception& error) {
+        ark::crash_log::writef("core fatal: %s", error.what());
         handle_core_failure(state, error);
+    } catch (...) {
+        ark::crash_log::write("core fatal: unknown exception");
     }
     return 0;
 }
@@ -197,6 +202,8 @@ CoreState* running_state() {
 } // namespace
 
 ARK_EXPORT bool ark_framework_start(const ArkBootOptionsV1* options) {
+    ark::crash_log::install("ArkFramework");
+    ark::crash_log::set_stage("ark_framework_start");
     if (g_starting.load()) {
         return !g_failed.load() && !g_stopping.load();
     }

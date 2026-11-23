@@ -294,6 +294,7 @@
     "damageUnitRail", "damageTotalBadge", "damageDpsBadge",
     "damageStatusBadge", "damageSelectedName", "damageSelectedMeta",
     "damageSelectedShare", "damageTypeGrid", "damageChart", "damageLegend",
+    "damageTargetList", "damageAttributionList", "damageAttributionHint",
     "damageStatsTabs", "damagePageSubtitle",
     "damageRailTitle", "damageChartTitle", "damageChartHint",
     "enemyCountBadge", "enemyWaveBadge", "enemyFocusBadge", "enemyList",
@@ -621,7 +622,10 @@
         if (!slot || !slot.id) return null;
         const caps = eliteCapsFor(slot.id);
         const evolve = clampInt(slot.evolve, 0, caps.length - 1, 0);
-        const skill = clampInt(slot.skill, 1, 3, 1);
+        const skillCount = rosterSkillCount(slot.id);
+        const skill = skillCount
+          ? clampInt(slot.skill, 1, skillCount, 1)
+          : 0;
         const skillLevels = normalizeSkillLevels(
           slot.skill_levels, slot.skill_level,
         );
@@ -633,7 +637,7 @@
           trust: clampInt(slot.trust, 0, 200, 100),
           skill,
           skill_levels: skillLevels,
-          skill_level: skillLevels[skill - 1],
+          skill_level: skillCount ? skillLevels[skill - 1] : 1,
           module: String(slot.module || ""),
           module_level: clampInt(slot.module_level, 1, 3, 3),
         };
@@ -713,6 +717,12 @@
   function clampInt(value, min, max, fallback) {
     const number = Number.parseInt(value, 10);
     return Number.isFinite(number) ? Math.max(min, Math.min(max, number)) : fallback;
+  }
+
+  function rosterSkillCount(id) {
+    const entry = ROSTER_BY_ID.get(String(id || ""));
+    if (!entry) return 3;
+    return Math.max(0, Math.min(3, entry.skills?.length || 0));
   }
 
   function squadCount() {
@@ -1262,7 +1272,9 @@
       const index = Number(button.dataset.index);
       const slot = state.squad[index];
       if (!slot) return;
-      slot.skill = clampInt(button.dataset.skill, 1, 3, 1);
+      const skillCount = rosterSkillCount(slot.id);
+      if (!skillCount) return;
+      slot.skill = clampInt(button.dataset.skill, 1, skillCount, 1);
       const levels = skillLevelsFor(slot);
       slot.skill_levels = levels;
       slot.skill_level = levels[slot.skill - 1];
@@ -1278,7 +1290,9 @@
       const index = Number(button.dataset.index);
       const slot = state.squad[index];
       if (!slot) return;
-      const skillIndex = clampInt(slot.skill, 1, 3, 1) - 1;
+      const skillIndex = clampInt(
+        slot.skill, 1, Math.max(1, rosterSkillCount(slot.id)), 1,
+      ) - 1;
       const levels = skillLevelsFor(slot);
       levels[skillIndex] = clampInt(button.dataset.level, 1, 10, 10);
       slot.skill_levels = levels;
@@ -1753,7 +1767,9 @@
     const tuner = control.dataset.squadTuner;
     if (tuner === "skill-level") {
       const levels = skillLevelsFor(slot);
-      const skillIndex = clampInt(slot.skill, 1, 3, 1) - 1;
+      const skillIndex = clampInt(
+        slot.skill, 1, Math.max(1, rosterSkillCount(slot.id)), 1,
+      ) - 1;
       levels[skillIndex] = clampInt(control.value, 1, 10, 10);
       slot.skill_levels = levels;
       slot.skill_level = levels[skillIndex];

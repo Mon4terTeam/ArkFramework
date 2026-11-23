@@ -53,10 +53,13 @@ bool LocalBattle::adopt_scene(void* controller) {
     panel_target_uid_ = 0;
     focused_renderers_.clear();
     focused_materials_.clear();
+    level_control_runtime_applied_ = false;
+    level_control_applied_scheduler_ = nullptr;
     reset_world_sampling();
     if (replacing) {
         log(kLogInfo, "战斗场景切换 revision=" + std::to_string(scene_.revision));
     }
+    apply_runtime_level_control(controller);
     return true;
 }
 
@@ -101,6 +104,8 @@ void LocalBattle::clear_scene() {
     panel_target_uid_ = 0;
     focused_renderers_.clear();
     focused_materials_.clear();
+    level_control_runtime_applied_ = false;
+    level_control_applied_scheduler_ = nullptr;
     enemy_serials_.clear();
     enemy_identity_ids_.clear();
     next_enemy_serial_ = 1;

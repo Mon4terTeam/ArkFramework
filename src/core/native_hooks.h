@@ -29,6 +29,10 @@ public:
     // Returns a non-zero hook id and stores the callable original in *original, or returns 0
     // and sets error. A new hook starts disabled.
     uint64_t create(void* owner, void* target, void* detour, void** original, std::string& error);
+    // v2 preserves 5..8 integer/pointer ABI arguments. argument_count is the total machine
+    // argument count, including any leading `this` or trailing MethodInfo* the target takes.
+    uint64_t create_v2(void* owner, void* target, void* detour, void** original,
+                       uint32_t argument_count, std::string& error);
 
     // Disabling only bypasses this owner's link; other owners on the same target keep running.
     bool enable(void* owner, uint64_t id, bool enabled, std::string& error);
@@ -50,7 +54,10 @@ private:
     };
 
     NativeHookSlot* find(void* owner, uint64_t id, std::string& error);
-    NativeHookChain* find_or_create_chain(void* target, std::string& error);
+    uint64_t create_impl(void* owner, void* target, void* detour, void** original,
+                         uint32_t argument_count, bool v2, std::string& error);
+    NativeHookChain* find_or_create_chain(void* target, uint32_t argument_count,
+                                          bool v2, std::string& error);
 
     std::mutex mutex_;
     std::unordered_map<uint64_t, OwnedHook> hooks_;

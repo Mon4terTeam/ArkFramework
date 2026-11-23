@@ -9,6 +9,10 @@ ArkFramework 的本地战斗插件。直接构造并进入任意已加载关卡�
 - 局内支持部署、手动开技能、撤退、暂停/继续和返回主界面。
 - 技能开启前检查 `BasicSkill.get_spEnough` 与 `IsOpTriggerable(side)`；自动触发的技能不会误判为可手动开启。
 - 直接 Hook `BattleLogger.LogModifier` / `LogEpModifier`，按事件序列累计伤害、承伤和治疗；同一逻辑帧内的多次事件不会合并成 HP 差值。
+- `damage-formula start` 观察 `CalculateDamageInternal`、Heal/Element 入口与 Buff
+  伤判前后值，按目标实例和 Q32.32 精确值配对，提供分目标统计、属性分解和 Buff
+  伤判增量归因；实现边界见
+  [伤害公式采集与 Buff 归因](../../docs/DamageAttribution.md)。
 - 通过 `web_bridge.dll` 发布 Web 快照和干员目录，命令写入加载器目录下的 `BetterBattle.request`。
 - 支持普通关卡和 `GameModeMeta.ROGUELIKE` 肉鸽入口，可注入藏品、Buff 物品和局外成长条目。
 
@@ -39,13 +43,17 @@ rogue-capture
 rogue-dump-battle
 rogue-global-buffs
 game-mode
+level-control dump
+level-control hidden list|enable <group>|disable <group>|clear
 deploy <cardUid> <row> <col> [direction]
 skill <cardUid>
 skill-state <cardUid>
 skill-methods <cardUid>
 buff-fields <cardUid>
 buffs <cardUid>
-sp <cardUid> [value]
+damage-formula start [outputFile]
+damage-formula stop
+damage-formula status
 withdraw <cardUid>
 record start
 record stop
@@ -60,11 +68,10 @@ replay plan [@nodeId] <frame:ops;...> [stop=<frame>] [fast]
 replay seek <frame> [nodeId] [fast]
 replay simulate <frame> deploy|skill|withdraw <unit> [dir row col]
 replay stop
-trace start [fields]
+trace start [state,cost,hp,sp,skill,affect,remain,trigger,anim,stateid,ammo,overload,charge,mode,alive,all]
 trace stop
 pause
 resume
-cost <value>
 leave
 tiles <cardUid>
 refresh
@@ -74,6 +81,20 @@ export-web [prefix]
 ```
 
 部署、技能和撤退仍走 `BattleController.PlayerOp_Spawn` / `PlayerOp_TrigSkill` / `PlayerOp_Withdraw` 玩家入口。
+
+### 自定义技能调试
+
+自定义技能命令已经迁移到独立插件 `CustomSkills.dll`，不再由 BetterBattle
+注册或执行。命令写入 `CustomSkills.request`，结果读取
+`CustomSkills.status`。完整命令、JSON 格式和验证流程见
+[自定义技能加载与运行时](../../docs/CustomSkillLoading.md)。
+
+`trace` 的 `ammo` 输出 `progress/max/remaining`；`overload` 输出
+`m_isOverloaded/remainingOverloadProgress/overloadRatio/availableCnt`；`mode` 输出
+当前 `UnitMode` 索引；`charge` 输出 `availableCnt/shouldChangeToChargeColor`。
+
+当前技能类型、原生 AMMO/过载和范围模式的边界见
+[自定义技能加载与运行时](../../docs/CustomSkillLoading.md)。
 
 ## 录制与回放
 
@@ -102,6 +123,7 @@ export-web [prefix]
 ## 机制资料
 
 - Buff 字段、采集预算和快照边界：[Buff 系统运行时说明](../../docs/BuffSystem.md)
+- 权重敌人、隐藏组与关卡动作覆盖：[关卡控制说明](../../docs/LevelControl.md)
 - 肉鸽 Buff 下发链路：[RogueBattleBuffPipeline](../../docs/RogueBattleBuffPipeline.md)
 - 肉鸽机制证据台账：[RogueMechanicsEvidence](../../docs/RogueMechanicsEvidence.md)
 

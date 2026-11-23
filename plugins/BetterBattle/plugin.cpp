@@ -3,6 +3,7 @@
 
 #include <windows.h>
 
+#include <ark/crash_log.h>
 #include <ark/external_bridge.h>
 
 #include <algorithm>
@@ -28,6 +29,12 @@ namespace {
 constexpr std::uint64_t kReconnectDelayMs = 2000;
 
 std::atomic<LocalBattle*> active;
+thread_local std::string command_stage;
+
+void set_command_stage(const std::string& name) {
+    command_stage = "bb.command:" + name;
+    ark::crash_log::set_stage(command_stage.c_str());
+}
 
 struct TaskPacket {
     LocalBattle* owner = nullptr;
@@ -49,7 +56,8 @@ bool host_is_compatible(const ArkPluginApiV1* host) {
 }
 
 LocalBattle::LocalBattle(const ArkPluginApiV1& host)
-    : host_(host), battle_capture_(runtime_, host) {}
+    : host_(host), battle_capture_(runtime_, host),
+      damage_formula_capture_(runtime_, host) {}
 
 LocalBattle::~LocalBattle() {
     close_trace();
@@ -725,6 +733,106 @@ std::string LocalBattle::build_web_json(const BattleSnapshot& snap) const {
     };
     damage["elemental_buildup"] = number(snap.damage.elemental_buildup);
     damage["types"] = types_json(snap.damage.types);
+    const auto target_json = [&](const DamageTargetInfo& target) {
+        return json{
+            {"id", target.id},
+            {"uid", target.uid},
+            {"name", target.id.rfind("char_", 0) == 0 ? operator_name(target.id)
+                                                       : std::string()},
+            {"actual", number(target.actual)},
+            {"calculated", number(target.calculated)},
+            {"healing", number(target.healing)},
+            {"regen", number(target.regen)},
+            {"taken", number(target.taken)},
+            {"types", types_json(target.types)},
+        };
+    };
+    json target_totals = json::array();
+    for (const DamageTargetInfo& target : snap.damage.target_totals) {
+        target_totals.push_back(target_json(target));
+    }
+    damage["targets"] = std::move(target_totals);
+    json attribution = {
+        {"available", snap.damage.attribution.available},
+        {"exact_zones", snap.damage.attribution.exact_zones},
+        {"hits", snap.damage.attribution.hits},
+        {"observed_events", snap.damage.attribution.observed_events},
+        {"unmatched_events", snap.damage.attribution.unmatched_events},
+        {"types",
+         {
+             {"physical", snap.damage.attribution.physical_events},
+             {"magical", snap.damage.attribution.magical_events},
+             {"true", snap.damage.attribution.true_events},
+             {"healing", snap.damage.attribution.healing_events},
+             {"elemental", snap.damage.attribution.elemental_events},
+         }},
+        {"no_source_events", snap.damage.attribution.no_source_events},
+        {"base_damage", number(snap.damage.attribution.base_damage)},
+        {"modeled_damage", number(snap.damage.attribution.modeled_damage)},
+        {"unallocated", number(snap.damage.attribution.unallocated)},
+        {"entries",
+         {
+             {"calculate_damage",
+              snap.damage.attribution.entries.calculate_damage},
+             {"calculate_damage_no_event",
+              snap.damage.attribution.entries.calculate_damage_no_event},
+             {"calculate_damage_internal",
+              snap.damage.attribution.entries.calculate_damage_internal},
+             {"calculate_damage_value",
+              snap.damage.attribution.entries.calculate_damage_value},
+             {"element_source_target",
+              snap.damage.attribution.entries.element_source_target},
+             {"element_target",
+              snap.damage.attribution.entries.element_target},
+             {"element_value_only",
+              snap.damage.attribution.entries.element_value_only},
+             {"heal_source_target",
+              snap.damage.attribution.entries.heal_source_target},
+             {"heal_target",
+              snap.damage.attribution.entries.heal_target},
+         }},
+    };
+    json attribution_totals = json::array();
+    for (const DamageAttributionTotal& total :
+         snap.damage.attribution.totals) {
+        attribution_totals.push_back({
+            {"actor", total.actor},
+            {"target", total.target},
+            {"target_uid", total.target_uid},
+            {"metric", total.metric},
+            {"zone", total.zone},
+            {"source_kind", total.source_kind},
+            {"source_key", total.source_key},
+            {"source_label", total.source_label},
+            {"source_id", total.source_id},
+            {"buff_uid", total.buff_uid},
+            {"shapley", number(total.shapley)},
+            {"counterfactual", number(total.counterfactual)},
+            {"hits", total.hits},
+        });
+    }
+    attribution["totals"] = std::move(attribution_totals);
+    json no_source_totals = json::array();
+    for (const DamageAttributionTotal& total :
+         snap.damage.attribution.no_source_totals) {
+        no_source_totals.push_back({
+            {"actor", total.actor},
+            {"target", total.target},
+            {"target_uid", total.target_uid},
+            {"metric", total.metric},
+            {"zone", total.zone},
+            {"source_kind", total.source_kind},
+            {"source_key", total.source_key},
+            {"source_label", total.source_label},
+            {"source_id", total.source_id},
+            {"buff_uid", total.buff_uid},
+            {"shapley", number(total.shapley)},
+            {"counterfactual", number(total.counterfactual)},
+            {"hits", total.hits},
+        });
+    }
+    attribution["no_source_totals"] = std::move(no_source_totals);
+    damage["attribution"] = std::move(attribution);
     if (snap.damage.curves_included) {
         damage["series"] = {
             {"frame_step", snap.damage.series.step_frames},
@@ -774,6 +882,12 @@ std::string LocalBattle::build_web_json(const BattleSnapshot& snap) const {
             {"curve_points", actor.curve_points},
             {"types", types_json(actor.types)},
         };
+        json actor_targets = json::array();
+        for (const auto& [target_key, target] : actor.targets) {
+            (void)target_key;
+            actor_targets.push_back(target_json(target));
+        }
+        item["targets"] = std::move(actor_targets);
         if (snap.damage.curves_included) {
             item["curve"] = curve_json(actor.curve);
             item["healing_curve"] = curve_json(actor.healing_curve);
@@ -1150,6 +1264,14 @@ void LocalBattle::connect_if_ready() {
             log(kLogWarning, std::string("Battle event capture unavailable: ") +
                                  error.what());
         }
+        try {
+            if (!damage_formula_capture_.initialize()) {
+                log(kLogWarning, "BetterBattle damage formula capture is not ready");
+            }
+        } catch (const std::exception& error) {
+            log(kLogWarning, std::string("Damage formula capture unavailable: ") +
+                                 error.what());
+        }
         void* updater = runtime_.find("Torappu", "GlobalInitializerAndUpdater");
         void* update = runtime_.method(updater, "Update", 0);
         std::uint32_t flags = 0;
@@ -1315,8 +1437,19 @@ void LocalBattle::maybe_schedule_refresh() {
 }
 
 void LocalBattle::schedule_next_work() {
-    if (!pump_ready_ || work_running_.load() || host_.test_host) {
+    if (!pump_ready_ || host_.test_host) {
         return;
+    }
+    if (work_running_.load()) {
+        const std::uint64_t now = GetTickCount64();
+        const std::uint64_t started = work_started_tick_.load();
+        if (started && now - started < 2000) {
+            return;
+        }
+        // A task can be queued while the game is paused and never reach its
+        // game-thread callback. Do not let that single task block all later
+        // requests forever.
+        work_running_.store(false);
     }
     std::unique_ptr<TaskPacket> packet;
     {
@@ -1327,6 +1460,7 @@ void LocalBattle::schedule_next_work() {
         packet = std::make_unique<TaskPacket>(TaskPacket{this, std::move(pending_.front())});
         pending_.pop_front();
     }
+    work_started_tick_.store(GetTickCount64());
     work_running_.store(true);
     if (!host_.queue_game_task(host_.owner, &LocalBattle::game_task, packet.get())) {
         work_running_.store(false);
@@ -1341,12 +1475,15 @@ void LocalBattle::game_task(void* user) {
     auto* packet = static_cast<TaskPacket*>(user);
     std::unique_ptr<TaskPacket> owned(packet);
     LocalBattle* self = owned->owner;
+    set_command_stage(owned->command.name);
     try {
         self->run_command(owned->command);
     } catch (const std::exception& error) {
+        ark::crash_log::writef("BetterBattle task fatal: %s", error.what());
         self->publish_result(std::string("局内任务异常: ") + error.what(), false);
         self->log(kLogError, std::string("BetterBattle task failed: ") + error.what());
     } catch (...) {
+        ark::crash_log::write("BetterBattle task fatal: unknown exception");
         self->publish_result("局内任务发生未知异常", false);
     }
     self->work_running_.store(false);
@@ -1354,6 +1491,7 @@ void LocalBattle::game_task(void* user) {
 }
 
 void LocalBattle::on_global_update(void* self, void* method) {
+    ark::crash_log::set_stage("bb.on_global_update");
     LocalBattle* battle = active.load();
     if (!battle) {
         return;
@@ -1364,18 +1502,32 @@ void LocalBattle::on_global_update(void* self, void* method) {
         original(self, method);
     }
     const std::uint64_t tick_started = perf_now_us();
-    battle->process_request_file();
-    battle->schedule_next_work();
-    if (battle->finish_home_pending_.exchange(false, std::memory_order_acq_rel)) {
-        if (!battle->route_home_from_finish()) {
-            battle->finish_home_pending_.store(true, std::memory_order_release);
+    try {
+        ark::crash_log::set_stage("bb.process_request_file");
+        battle->process_request_file();
+        ark::crash_log::set_stage("bb.schedule_next_work");
+        battle->schedule_next_work();
+        if (battle->finish_home_pending_.exchange(false, std::memory_order_acq_rel)) {
+            ark::crash_log::set_stage("bb.route_home_from_finish");
+            if (!battle->route_home_from_finish()) {
+                battle->finish_home_pending_.store(true, std::memory_order_release);
+            }
+            return;
         }
-        return;
+        ark::crash_log::set_stage("bb.trace_frame");
+        battle->trace_frame();
+        ark::crash_log::set_stage("bb.maybe_schedule_refresh");
+        battle->maybe_schedule_refresh();
+        ark::crash_log::set_stage("bb.pump_game_tasks");
+        battle->host_.pump_game_tasks(battle->host_.owner);
+        battle->perf_.frame_tick.add(perf_now_us() - tick_started);
+    } catch (const std::exception& error) {
+        ark::crash_log::writef("BetterBattle frame hook fatal: %s", error.what());
+        battle->log(kLogError,
+                    std::string("BetterBattle frame hook failed: ") + error.what());
+    } catch (...) {
+        ark::crash_log::write("BetterBattle frame hook fatal: unknown exception");
     }
-    battle->trace_frame();
-    battle->maybe_schedule_refresh();
-    battle->host_.pump_game_tasks(battle->host_.owner);
-    battle->perf_.frame_tick.add(perf_now_us() - tick_started);
 }
 
 void* LocalBattle::on_player_data_get(void* self, void* method) {
@@ -1626,6 +1778,7 @@ bool LocalBattle::can_unload() const {
 
 bool LocalBattle::shutdown() {
     stopping_.store(true);
+    damage_formula_capture_.shutdown();
     if (!battle_capture_.shutdown()) {
         return false;
     }
@@ -1746,6 +1899,8 @@ void launch_webview(const char* root_directory) {
 }
 
 bool initialize(const ArkPluginApiV1* host) {
+    ark::crash_log::install("BetterBattle");
+    ark::crash_log::set_stage("bb.initialize");
     if (!ark::better_battle::host_is_compatible(host) || plugin.load()) {
         return false;
     }

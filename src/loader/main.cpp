@@ -6,6 +6,9 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <exception>
+
+#include <ark/crash_log.h>
 
 #include "command_line.h"
 #include "framework_loader.h"
@@ -132,16 +135,25 @@ int run_command(const CommandLineOptions& options) {
 int wmain(int argc, wchar_t** argv) {
     using namespace ark::loader;
 
-    if (argc == 1) {
-        return run_interactive_session(loader_directory());
+    ark::crash_log::install("ArkFrameworkLoader");
+    try {
+        if (argc == 1) {
+            return run_interactive_session(loader_directory());
+        }
+        CommandLineOptions options;
+        if (!parse_command_line(argc, argv, options)) {
+            std::puts(kUsage);
+            LoadReport report;
+            report.fail("invalid_options", ERROR_INVALID_PARAMETER);
+            write_report(report, options.report_path);
+            return kExitInvalidOptions;
+        }
+        return run_command(options);
+    } catch (const std::exception& error) {
+        ark::crash_log::writef("loader fatal: %s", error.what());
+        return kExitFailure;
+    } catch (...) {
+        ark::crash_log::write("loader fatal: unknown exception");
+        return kExitFailure;
     }
-    CommandLineOptions options;
-    if (!parse_command_line(argc, argv, options)) {
-        std::puts(kUsage);
-        LoadReport report;
-        report.fail("invalid_options", ERROR_INVALID_PARAMETER);
-        write_report(report, options.report_path);
-        return kExitInvalidOptions;
-    }
-    return run_command(options);
 }

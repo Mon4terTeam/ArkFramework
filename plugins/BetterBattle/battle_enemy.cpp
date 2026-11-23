@@ -1095,11 +1095,11 @@ void LocalBattle::refresh_enemies(void* controller, BattleSnapshot& snapshot) {
                              "get_moveSpeed");
             info.alive =
                 method_bool(runtime_, entry.object, classes_.entity, "get_alive");
-            info.boss =
-                method_bool(runtime_, entry.object, classes_.enemy, "get_isBoss");
-            info.giant_boss =
-                method_bool(runtime_, entry.object, classes_.enemy,
-                            "get_isGiantBoss");
+            void* runtime_class = runtime_.object_class(entry.object);
+            info.boss = method_bool(runtime_, entry.object, runtime_class,
+                                    "get_isBoss");
+            info.giant_boss = method_bool(runtime_, entry.object, runtime_class,
+                                          "get_isGiantBoss");
             info.mass_level =
                 method_int(runtime_, entry.object, classes_.enemy,
                            "get_massLevel", 0);
@@ -1216,6 +1216,12 @@ void LocalBattle::refresh_enemies(void* controller, BattleSnapshot& snapshot) {
                                   buff_cache_generation_, perf_.buff_hits,
                                   perf_.buff_misses, info.buffs, nullptr);
             } catch (...) {
+            }
+            if (damage_formula_capture_.active()) {
+                std::vector<AttributeContribution> contributions;
+                collect_attribute_contributions(info.buffs, contributions);
+                damage_formula_capture_.update_entity(
+                    entry.object, info.id, info.uid, contributions);
             }
             read_attribute_panel(entry.object, info);
             snapshot.enemies.push_back(std::move(info));

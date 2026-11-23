@@ -1,6 +1,8 @@
 #include "BetterBattle.h"
 #include "probe_support.h"
 
+#include <ark/crash_log.h>
+
 namespace ark::better_battle {
 
 using namespace probe_support;
@@ -16,6 +18,7 @@ void LocalBattle::queue_trace_line(std::string line) {
 }
 
 void LocalBattle::trace_writer_loop(std::ofstream output) {
+    ark::crash_log::set_stage("bb.trace_writer");
     for (;;) {
         std::deque<std::string> pending;
         {
@@ -62,7 +65,9 @@ void LocalBattle::start_trace(const std::string& fields) {
             if (token == "all") {
                 selected |= kTraceDefault | kTraceSkillRemaining |
                             kTraceSkillTrigger | kTraceSkillBeginAnim |
-                            kTraceStateId;
+                            kTraceStateId | kTraceSkillAmmo |
+                            kTraceSkillOverload | kTraceMode |
+                            kTraceSkillCharge;
             }
             else if (token == "state") selected |= kTraceState;
             else if (token == "cost") selected |= kTraceCost;
@@ -75,11 +80,15 @@ void LocalBattle::start_trace(const std::string& fields) {
             else if (token == "trigger") selected |= kTraceSkillTrigger;
             else if (token == "anim") selected |= kTraceSkillBeginAnim;
             else if (token == "stateid") selected |= kTraceStateId;
+            else if (token == "ammo") selected |= kTraceSkillAmmo;
+            else if (token == "overload") selected |= kTraceSkillOverload;
+            else if (token == "mode") selected |= kTraceMode;
+            else if (token == "charge") selected |= kTraceSkillCharge;
             else {
                 throw std::runtime_error(
                     "未知追踪字段：" + token +
                     "（可用 state,cost,hp,sp,skill,affect,remain,"
-                    "trigger,anim,stateid,alive,all）");
+                    "trigger,anim,stateid,ammo,overload,charge,mode,alive,all）");
             }
         }
     }
@@ -115,6 +124,8 @@ void LocalBattle::start_trace(const std::string& fields) {
         find(classes_.character, "get_isInSkillState");
     trace_state_id_method_ = find(classes_.entity, "get_currentStateId");
     trace_alive_method_ = find(classes_.entity, "get_alive");
+    trace_mode_method_ =
+        find(classes_.character, "get_currentModeIndex");
 
     const auto entry = [](void* method) {
         return *static_cast<void**>(method);
@@ -137,6 +148,7 @@ void LocalBattle::start_trace(const std::string& fields) {
     bind(trace_in_skill_method_, trace_in_skill_get_);
     bind(trace_state_id_method_, trace_state_id_get_);
     bind(trace_alive_method_, trace_alive_get_);
+    bind(trace_mode_method_, trace_mode_get_);
 
     const std::filesystem::path path =
         std::filesystem::path(host_.root_directory) / "battle_trace_frames.log";
@@ -207,6 +219,7 @@ void LocalBattle::close_trace() {
     trace_in_skill_method_ = nullptr;
     trace_state_id_method_ = nullptr;
     trace_alive_method_ = nullptr;
+    trace_mode_method_ = nullptr;
     trace_frame_get_ = nullptr;
     trace_paused_get_ = nullptr;
     trace_playing_get_ = nullptr;
@@ -217,6 +230,7 @@ void LocalBattle::close_trace() {
     trace_in_skill_get_ = nullptr;
     trace_state_id_get_ = nullptr;
     trace_alive_get_ = nullptr;
+    trace_mode_get_ = nullptr;
     trace_has_frame_ = false;
     trace_last_units_.clear();
     trace_last_state_.clear();
@@ -225,6 +239,7 @@ void LocalBattle::close_trace() {
 }
 
 void LocalBattle::trace_frame() {
+    ark::crash_log::set_stage("bb.trace_frame");
     if (!trace_active_ || !scene_.controller || !trace_frame_get_) {
         return;
     }
@@ -301,7 +316,8 @@ void LocalBattle::trace_frame() {
         constexpr std::uint32_t kTraceUnitFields =
             kTraceHp | kTraceSp | kTraceSkill | kTraceAlive | kTraceSkillAffect |
             kTraceSkillRemaining | kTraceSkillTrigger |
-            kTraceSkillBeginAnim | kTraceStateId;
+            kTraceSkillBeginAnim | kTraceStateId | kTraceSkillAmmo |
+            kTraceSkillOverload | kTraceMode | kTraceSkillCharge;
         if (!same_frame && (trace_fields_ & kTraceUnitFields)) {
             std::string units;
             units.reserve(trace_units_.size() * 96);
@@ -354,6 +370,10 @@ void LocalBattle::trace_frame() {
                             }
                             return method;
                         };
+                        const auto optional = [&](const char* name) {
+                            return find_method_optional(runtime_, skill_class,
+                                                        name, 0);
+                        };
                         TraceSkillMethods methods;
                         if (trace_fields_ & kTraceSkillAffect) {
                             methods.affecting = require("get_isAffecting");
@@ -366,6 +386,24 @@ void LocalBattle::trace_frame() {
                         }
                         if (trace_fields_ & kTraceSkillBeginAnim) {
                             methods.begin_anim = require("get_hasPlayedBeginAnim");
+                        }
+                        if (trace_fields_ & kTraceSkillAmmo) {
+                            methods.progress_count = optional("get_progressCount");
+                            methods.max_count = optional("get_maxCount");
+                            methods.remaining_count = optional("get_remainingCount");
+                        }
+                        if (trace_fields_ & kTraceSkillOverload) {
+                            methods.is_overloaded = optional("get_isOverloaded");
+                            methods.remaining_overload =
+                                optional("get_remainingOverloadProgress");
+                            methods.overload_ratio =
+                                optional("get_overloadRatio");
+                            methods.available_count = optional("get_availableCnt");
+                        }
+                        if (trace_fields_ & kTraceSkillCharge) {
+                            methods.available_count = optional("get_availableCnt");
+                            methods.should_change_charge_color =
+                                optional("get_shouldChangeToChargeColor");
                         }
                         skill_methods =
                             &trace_skill_methods_.emplace(skill_class, methods)
@@ -408,11 +446,101 @@ void LocalBattle::trace_frame() {
                         buffer, sizeof(buffer), ":anim%d", begin_anim ? 1 : 0);
                     units.append(buffer, static_cast<std::size_t>(n));
                 }
+                if (trace_fields_ & kTraceSkillAmmo) {
+                    if (skill &&
+                        skill_methods &&
+                        skill_methods->progress_count &&
+                        skill_methods->max_count &&
+                        skill_methods->remaining_count) {
+                        const int progress_count = get_int(
+                            skill, skill_methods->progress_count, nullptr);
+                        const int max_count = get_int(
+                            skill, skill_methods->max_count, nullptr);
+                        const int remaining_count = get_int(
+                            skill, skill_methods->remaining_count, nullptr);
+                        const int n = std::snprintf(
+                            buffer, sizeof(buffer), ":ammo%d/%d/%d",
+                            progress_count, max_count, remaining_count);
+                        units.append(buffer, static_cast<std::size_t>(n));
+                    } else {
+                        units += ":ammo-";
+                    }
+                }
+                if (trace_fields_ & kTraceSkillOverload) {
+                    if (skill && skill_methods) {
+                        const int overloaded =
+                            skill_methods->is_overloaded
+                                ? (get_bool(skill,
+                                            skill_methods->is_overloaded,
+                                            nullptr)
+                                       ? 1
+                                       : 0)
+                                : -1;
+                        std::int64_t remaining_raw = 0;
+                        if (skill_methods->remaining_overload) {
+                            remaining_raw = get_fixed_raw(
+                                skill, skill_methods->remaining_overload,
+                                nullptr);
+                        }
+                        std::int64_t ratio_raw = 0;
+                        if (skill_methods->overload_ratio) {
+                            ratio_raw = get_fixed_raw(
+                                skill, skill_methods->overload_ratio, nullptr);
+                        }
+                        const int available =
+                            skill_methods->available_count
+                                ? get_int(skill,
+                                          skill_methods->available_count,
+                                          nullptr)
+                                : -1;
+                        const int n = std::snprintf(
+                            buffer, sizeof(buffer),
+                            ":ov%d:rov%.3f:ratio%.3f:av%d", overloaded,
+                            static_cast<double>(remaining_raw) /
+                                kFixedPointScale,
+                            static_cast<double>(ratio_raw) /
+                                kFixedPointScale,
+                            available);
+                        units.append(buffer, static_cast<std::size_t>(n));
+                    } else {
+                        units += ":ov-";
+                    }
+                }
+                if (trace_fields_ & kTraceSkillCharge) {
+                    const int available =
+                        skill && skill_methods &&
+                                skill_methods->available_count
+                            ? get_int(skill,
+                                      skill_methods->available_count,
+                                      nullptr)
+                            : -1;
+                    const int color =
+                        skill && skill_methods &&
+                                skill_methods->should_change_charge_color
+                            ? (get_bool(
+                                   skill,
+                                   skill_methods->should_change_charge_color,
+                                   nullptr)
+                                   ? 1
+                                   : 0)
+                            : -1;
+                    const int n = std::snprintf(
+                        buffer, sizeof(buffer), ":charge%d/%d",
+                        available, color);
+                    units.append(buffer, static_cast<std::size_t>(n));
+                }
                 if (trace_fields_ & kTraceStateId) {
                     const int state_id =
                         get_int(object, trace_state_id_method_, trace_state_id_get_);
                     const int n = std::snprintf(
                         buffer, sizeof(buffer), ":st%d", state_id);
+                    units.append(buffer, static_cast<std::size_t>(n));
+                }
+                if (trace_fields_ & kTraceMode) {
+                    const int mode = get_int(
+                        object, trace_mode_method_, trace_mode_get_);
+                    const int n = std::snprintf(
+                        buffer, sizeof(buffer), ":mode%d", mode);
                     units.append(buffer, static_cast<std::size_t>(n));
                 }
                 if (trace_fields_ & kTraceAlive) {

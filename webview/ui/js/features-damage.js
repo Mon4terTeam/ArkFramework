@@ -111,6 +111,138 @@
     container.replaceChildren(...items);
   }
 
+  function damageTargetName(id) {
+    const value = String(id || "");
+    if (!value) return "未知目标";
+    if (value.startsWith("char_")) return operatorName(value) || value;
+    const profile = (state.snapshot?.enemy_profiles || [])
+      .find((entry) => String(entry?.id || "") === value);
+    return profile?.name || value;
+  }
+
+  function renderDamageBreakdown(selected) {
+    if (!dom.damageTargetList || !dom.damageAttributionList) return;
+    const actor = selected || null;
+    const mode = state.pageStatsMode;
+    const targetMetric = mode === "healing" ? "healing" : mode === "taken" ? "taken" : "actual";
+    const targets = actor && Array.isArray(actor.targets)
+      ? actor.targets
+          .filter((target) => Number(target?.[targetMetric]) > 0.009)
+          .sort((left, right) =>
+            Number(right?.[targetMetric]) - Number(left?.[targetMetric]))
+      : [];
+    const targetTotal = targets.reduce(
+      (sum, target) => sum + Number(target?.[targetMetric] || 0), 0);
+    const targetIdCounts = new Map();
+    for (const target of targets) {
+      const id = String(target?.id || "");
+      targetIdCounts.set(id, (targetIdCounts.get(id) || 0) + 1);
+    }
+    const targetKey = `${actor?.id || ""}:${mode}:${
+      targets.map((target) => `${target.id}:${target.uid}:${Math.round(Number(target[targetMetric]) || 0)}`).join(",")
+    }`;
+    if (dom.damageTargetList.dataset.renderKey !== targetKey) {
+      dom.damageTargetList.dataset.renderKey = targetKey;
+      dom.damageTargetList.innerHTML = targets.length
+        ? targets.map((target) => {
+            const value = Number(target?.[targetMetric]) || 0;
+            const repeated = (targetIdCounts.get(String(target.id || "")) || 0) > 1;
+            const label = `${damageTargetName(target.id)}${repeated && target.uid ? ` #${target.uid}` : ""}`;
+            return `<div class="damage-breakdown-row ${value < 0 ? "is-negative" : ""}">` +
+              `<strong>${esc(label)}</strong>` +
+              `<span class="damage-breakdown-meta">${esc(
+                mode === "taken" ? "来自" : "占比",
+              )} ${mode === "taken" ? esc(target.id) : `${fmt(damageShare(value, targetTotal))}%`}</span>` +
+              `<span class="damage-breakdown-value">${esc(fmtCompact(value))}</span></div>`;
+          }).join("")
+        : `<div class="empty-small">当前干员暂无${mode === "taken" ? "承伤" : mode === "healing" ? "治疗" : "伤害"}目标数据</div>`;
+    }
+
+    const attribution = state.damage?.attribution;
+    const metric = mode === "healing" ? "healing" : "damage";
+    const selectedId = String(actor?.id || "");
+    const totals = [
+      ...(Array.isArray(attribution?.totals) ? attribution.totals : []),
+      ...(selectedId === "__no_source__" &&
+      Array.isArray(attribution?.no_source_totals)
+        ? attribution.no_source_totals
+        : []),
+    ];
+    const grouped = new Map();
+    for (const entry of totals) {
+      if (String(entry?.metric || "") !== metric) continue;
+      if (mode !== "taken" && String(entry?.actor || "") !== selectedId) continue;
+      if (mode === "taken" && String(entry?.target || "") !== selectedId) continue;
+      const key = [
+        entry.source_kind,
+        entry.source_key,
+        entry.buff_uid,
+        entry.source_label,
+        entry.source_id,
+      ].join("\u001f");
+      const current = grouped.get(key) || {
+        label: entry.source_label || entry.source_key || "未命名来源",
+        kind: entry.source_kind || "",
+        zone: entry.zone || "",
+        value: 0,
+        counterfactual: 0,
+        hits: 0,
+      };
+      current.value += Number(entry.shapley) || 0;
+      current.counterfactual += Number(entry.counterfactual) || 0;
+      current.hits += Number(entry.hits) || 0;
+      current.zone = entry.zone || current.zone;
+      grouped.set(key, current);
+    }
+    const rows = [...grouped.values()]
+      .filter((entry) => Math.abs(entry.value) > 0.01)
+      .sort((left, right) => Math.abs(right.value) - Math.abs(left.value));
+    const attributionKey = `${selectedId}:${mode}:${rows.map((row) =>
+      `${row.label}:${Math.round(row.value * 100)}`).join(",")}:${attribution?.hits || 0}`;
+    if (dom.damageAttributionList.dataset.renderKey !== attributionKey) {
+      dom.damageAttributionList.dataset.renderKey = attributionKey;
+      dom.damageAttributionList.innerHTML = rows.length
+        ? rows.map((row) => {
+            const label = row.kind === "system" && row.zone === "residual"
+              ? "未归因残差"
+              : row.label;
+            return `<div class="damage-breakdown-row ${row.value < 0 ? "is-negative" : ""}">` +
+              `<strong title="${esc(row.zone)}">${esc(label)}</strong>` +
+              `<span class="damage-breakdown-meta">${esc(row.kind)} · ${esc(row.hits)} 次</span>` +
+              `<span class="damage-breakdown-value">${row.value >= 0 ? "+" : ""}${esc(fmtCompact(row.value))}</span></div>`;
+          }).join("")
+        : `<div class="empty-small">${attribution?.available
+            ? "当前干员暂无归因记录"
+            : "归因采集未开启：先发送 damage-formula start"}</div>`;
+    }
+    if (dom.damageAttributionHint) {
+      const observed = Number(attribution?.observed_events) || 0;
+      const unmatched = Number(attribution?.unmatched_events) || 0;
+      const types = attribution?.types || {};
+      const entries = attribution?.entries || {};
+      const typeText = [
+        Number(types.physical) || 0,
+        Number(types.magical) || 0,
+        Number(types.true) || 0,
+        Number(types.healing) || 0,
+        Number(types.elemental) || 0,
+      ].join("/");
+      const entryText = [
+        Number(entries.calculate_damage) || 0,
+        Number(entries.calculate_damage_no_event) || 0,
+        Number(entries.calculate_damage_internal) || 0,
+        Number(entries.calculate_damage_value) || 0,
+        Number(entries.element_value_only) || 0,
+        Number(entries.heal_source_target) || 0,
+      ].join("/");
+      dom.damageAttributionHint.textContent = attribution?.available
+        ? `Shapley 归因 · 精确配对 ${attribution.hits || 0}/${observed}` +
+          ` · 未匹配 ${unmatched} · 未归因 ${fmtCompact(attribution.unallocated || 0)}` +
+          ` · 类型 p/m/t/h/e ${typeText} · 入口 ${entryText}`
+        : "归因采集未开启";
+    }
+  }
+
   function damageSvgNode(tag, attributes = {}) {
     const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
     for (const [key, value] of Object.entries(attributes)) {
@@ -485,6 +617,16 @@
       dom.damageSelectedMeta.textContent = `暂无${mode.label}记录`;
       dom.damageSelectedShare.textContent = "0%";
       dom.damageTypeGrid.innerHTML = "";
+      if (dom.damageTargetList) {
+        dom.damageTargetList.dataset.renderKey = "";
+        dom.damageTargetList.innerHTML =
+          `<div class="empty-small">等待分目标数据</div>`;
+      }
+      if (dom.damageAttributionList) {
+        dom.damageAttributionList.dataset.renderKey = "";
+        dom.damageAttributionList.innerHTML =
+          `<div class="empty-small">等待归因数据</div>`;
+      }
       dom.damageLegend.replaceChildren();
       dom.damageChart.replaceChildren(
         Object.assign(document.createElement("div"), {
@@ -577,6 +719,7 @@
             )}</strong><em>${esc(mode.label)}</em></div>`,
           ).join("");
     }
+    renderDamageBreakdown(selected);
 
     const chartSeries = operators
       .filter((actor) => statsCurve(actor, mode).length >= 2)

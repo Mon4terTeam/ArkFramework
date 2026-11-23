@@ -177,7 +177,11 @@ std::string read_string_field(il2cpp::Runtime& runtime, void* object, void* klas
     if (!read_field_deep(runtime, object, klass, name, &text) || !text) {
         return {};
     }
-    return runtime.string(text);
+    try {
+        return runtime.string(text);
+    } catch (...) {
+        return "<invalid-string>";
+    }
 }
 bool write_character_inst_trust(il2cpp::Runtime& runtime, void* instance,
                                        void* instance_class,
@@ -304,7 +308,14 @@ std::string method_string(il2cpp::Runtime& runtime, void* object, void* klass, c
         return {};
     }
     void* text = runtime.invoke(method, object);
-    return runtime.string(text);
+    if (!text) {
+        return {};
+    }
+    try {
+        return runtime.string(text);
+    } catch (...) {
+        return "<invalid-string>";
+    }
 }
 double unbox_fp(il2cpp::Runtime& runtime, void* boxed) {
     if (!boxed) {
@@ -616,7 +627,7 @@ void* find_character(il2cpp::Runtime& runtime, void* controller, void* controlle
             continue;
         }
         void* klass = runtime.object_class(object);
-        if (klass != character_class) {
+        if (!runtime.class_assignable(character_class, klass)) {
             continue;
         }
         std::uint32_t instance_uid = 0;
@@ -634,6 +645,44 @@ void* find_character(il2cpp::Runtime& runtime, void* controller, void* controlle
     }
     return nullptr;
 }
+void* find_entity_uid(il2cpp::Runtime& runtime, void* controller,
+                      void* controller_class, std::uint32_t uid) {
+    void* manager = nullptr;
+    if (!read_field_deep(runtime, controller, controller_class, "m_objectManger",
+                         &manager) ||
+        !manager) {
+        return nullptr;
+    }
+    Root manager_root(runtime, manager);
+    void* manager_class = runtime.object_class(manager);
+    void* list = nullptr;
+    if (!read_field_deep(runtime, manager, manager_class, "m_cachedList", &list) ||
+        !list) {
+        return nullptr;
+    }
+    Root list_root(runtime, list);
+    void* bobject_class = runtime.find("Torappu.Battle", "BObject");
+    void* entity_class = runtime.find("Torappu.Battle", "Entity");
+    const int count = runtime.count(list);
+    for (int index = 0; index < count; ++index) {
+        void* object = runtime.at(list, index);
+        if (!object) {
+            continue;
+        }
+        void* klass = runtime.object_class(object);
+        if (entity_class && (!klass || !runtime.class_assignable(entity_class, klass))) {
+            continue;
+        }
+        std::uint32_t instance_uid = 0;
+        if (read_field_deep(runtime, object, bobject_class,
+                            "<instanceUid>k__BackingField", &instance_uid) &&
+            instance_uid == uid) {
+            return object;
+        }
+    }
+    return nullptr;
+}
+
 void* find_card(il2cpp::Runtime& runtime, void* controller, void* controller_class,
                 std::uint32_t uid, void** deck_out) {
     void* decks = nullptr;
@@ -708,9 +757,24 @@ std::string describe_class_layout(il2cpp::Runtime& runtime, void* klass, bool in
                 method_text.find("Item") != std::string::npos ||
                 method_text.find("Add") != std::string::npos ||
                 method_text.find("Remove") != std::string::npos ||
-                method_text.find("Get") != std::string::npos) {
+                method_text.find("Get") != std::string::npos ||
+                method_text.find("Damage") != std::string::npos ||
+                method_text.find("Modifier") != std::string::npos ||
+                method_text.find("Calculate") != std::string::npos) {
                 output << "  M " << method_text << '/'
-                       << runtime.method_count(method) << " -> ";
+                       << runtime.method_count(method) << '(';
+                for (std::uint32_t index = 0;
+                     index < runtime.method_count(method); ++index) {
+                    if (index) {
+                        output << ", ";
+                    }
+                    try {
+                        output << runtime.type(runtime.method_param(method, index));
+                    } catch (...) {
+                        output << '?';
+                    }
+                }
+                output << ") -> ";
                 try {
                     output << runtime.type(runtime.method_return(method));
                 } catch (...) {
@@ -833,6 +897,33 @@ void collect_buff_internal_list(il2cpp::Runtime& runtime, void* list, void* buff
         }
     }
 }
+
+void collect_buff_descendants(il2cpp::Runtime& runtime, void* buff,
+                              void* buff_class,
+                              std::vector<void*>& output,
+                              std::unordered_set<void*>& seen, int& budget) {
+    if (!buff || !buff_class || budget <= 0 || !seen.contains(buff)) {
+        return;
+    }
+    void* derived = nullptr;
+    if (!read_field_deep(runtime, buff, buff_class, "m_derivedBuffs",
+                         &derived) ||
+        !derived) {
+        return;
+    }
+    Root derived_root(runtime, derived);
+    const std::size_t start = output.size();
+    collect_buff_internal_list(runtime, derived, buff_class, output, seen);
+    for (std::size_t index = start; index < output.size(); ++index) {
+        --budget;
+        if (budget <= 0) {
+            break;
+        }
+        collect_buff_descendants(runtime, output[index], buff_class, output,
+                                 seen, budget);
+    }
+}
+
 std::string join_nonempty(const std::vector<std::string>& values, const char* separator) {
     std::string result;
     for (const std::string& value : values) {
@@ -925,6 +1016,42 @@ std::string format_buff_modifiers(il2cpp::Runtime& runtime, void* buff,
     read_buff_modifiers(runtime, buff, buff_class, entries);
     return format_buff_modifiers(entries);
 }
+
+void collect_attribute_contributions(
+    const std::vector<UnitInfo::BuffInfo>& buffs,
+    std::vector<AttributeContribution>& output) {
+    output.clear();
+    for (const UnitInfo::BuffInfo& buff : buffs) {
+        if (!buff.enabled || !buff.valid || buff.finished) {
+            continue;
+        }
+        for (const BuffModifierInfo& modifier : buff.modifier_entries) {
+            AttributeContribution contribution;
+            contribution.attribute = modifier.attribute;
+            contribution.key = buff.key;
+            contribution.label =
+                buff.override_key.empty() ? buff.key : buff.override_key;
+            contribution.source = buff.source_id;
+            contribution.uid = buff.uid;
+            switch (modifier.kind) {
+            case BuffModifierKind::Addition:
+                contribution.addition = modifier.value;
+                break;
+            case BuffModifierKind::Multiplier:
+                contribution.multiplier = modifier.value;
+                break;
+            case BuffModifierKind::FinalAddition:
+                contribution.final_addition = modifier.value;
+                break;
+            case BuffModifierKind::FinalScaler:
+                contribution.final_scaler = modifier.value;
+                break;
+            }
+            output.push_back(std::move(contribution));
+        }
+    }
+}
+
 std::int64_t buff_modifier_time_bucket(std::int64_t raw) {
     if (raw < 0) {
         return std::numeric_limits<std::int64_t>::lowest();
@@ -1360,9 +1487,8 @@ void read_entity_buffs(il2cpp::Runtime& runtime, void* entity, void* entity_clas
                             "m_internalList", &internal_list) &&
             internal_list) {
             Root internal_root(runtime, internal_list);
-            std::unordered_set<void*> list_seen;
             collect_buff_internal_list(runtime, internal_list, buff_class, objects,
-                                       list_seen);
+                                       seen);
         }
     }
     void* uid_map = nullptr;
@@ -1371,6 +1497,11 @@ void read_entity_buffs(il2cpp::Runtime& runtime, void* entity, void* entity_clas
         uid_map) {
         Root uid_map_root(runtime, uid_map);
         collect_buff_uid_map(runtime, uid_map, buff_class, objects, seen, budget);
+    }
+    const std::size_t root_count = objects.size();
+    for (std::size_t index = 0; index < root_count && budget > 0; ++index) {
+        collect_buff_descendants(runtime, objects[index], buff_class, objects,
+                                 seen, budget);
     }
     std::sort(objects.begin(), objects.end());
     objects.erase(std::unique(objects.begin(), objects.end()), objects.end());
